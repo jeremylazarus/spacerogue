@@ -1,39 +1,58 @@
-// Placeholder: a procedurally seeded starfield. The game is built on top of this.
+import './ui/style.css';
+import { initInput, endFrameInput } from './core/input';
+import { audio } from './core/audio';
+import { Renderer } from './game/render';
+import { Game } from './game/game';
+import { UI } from './ui/ui';
+import { meta } from './game/meta';
+import { hashSeed } from './core/rng';
+import { systemSeed } from './game/run';
+
 const canvas = document.getElementById('game') as HTMLCanvasElement;
-const ctx = canvas.getContext('2d')!;
+const uiRoot = document.getElementById('ui') as HTMLElement;
+initInput(canvas);
+audio.setVolumes(meta.settings.master, meta.settings.sfx, meta.settings.music);
+addEventListener('pointerdown', () => audio.unlock(), { once: false });
+addEventListener('keydown', () => audio.unlock(), { once: false });
 
-function mulberry32(seed: number) {
-  return () => {
-    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+const renderer = new Renderer(canvas);
+const game = new Game();
+const ui = new UI(uiRoot, game);
+game.ui = ui;
+ui.toastFn = (m, c) => renderer.toast(m, c);
+ui.onTitle = () => {
+  game.world = null;
+  renderer.setBackground(hashSeed('menu'));
+  ui.showTitle();
+};
+ui.onTitle();
 
-const rand = mulberry32((Math.random() * 2 ** 32) >>> 0);
-const stars = Array.from({ length: 400 }, () => ({ x: rand(), y: rand(), z: rand() }));
-
-function resize() {
-  canvas.width = innerWidth * devicePixelRatio;
-  canvas.height = innerHeight * devicePixelRatio;
-}
-addEventListener('resize', resize);
-resize();
-
-function frame(t: number) {
-  const { width: w, height: h } = canvas;
-  ctx.fillStyle = '#02030a';
-  ctx.fillRect(0, 0, w, h);
-  for (const s of stars) {
-    const x = ((s.x * w - t * 0.02 * s.z * devicePixelRatio) % w + w) % w;
-    ctx.fillStyle = `rgba(200,220,255,${0.3 + s.z * 0.7})`;
-    ctx.fillRect(x, s.y * h, 1 + s.z * 2, 1 + s.z * 2);
+let last = performance.now();
+let lastWorld: unknown = null;
+function frame(now: number) {
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  const w = game.world;
+  if (w) {
+    if (w !== lastWorld) {
+      lastWorld = w;
+      renderer.setBackground(systemSeed(game.run!, w.node));
+      renderer.camX = w.player.x;
+      renderer.camY = w.player.y;
+    }
+    if (!game.paused) w.update(dt);
+    else audio.setThrust(0);
+    renderer.render(w, game.paused ? 0 : dt);
+  } else {
+    lastWorld = null;
+    renderer.drawBackdrop(now / 1000);
   }
-  ctx.fillStyle = '#9cf';
-  ctx.font = `${24 * devicePixelRatio}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillText('SPACEROGUE — under construction', w / 2, h / 2);
+  endFrameInput();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+if (import.meta.env.DEV) (window as unknown as { __game: Game }).__game = game;
+
+// save on tab close
+addEventListener('beforeunload', () => game.save());

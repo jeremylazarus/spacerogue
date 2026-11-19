@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Spacerogue art test</title>
+    <style>
+      body { background: #05060a; color: #9ab; font: 12px monospace; margin: 12px; }
+      h2 { color: #cde; font-size: 14px; margin: 18px 0 6px; }
+      .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .cell { background: #0b0d14; border: 1px solid #1a2030; padding: 4px; text-align: center; }
+      .cell canvas { display: block; margin: auto; }
+      button { background: #121826; color: #bde; border: 1px solid #2a3550; margin: 2px; padding: 4px 8px; cursor: pointer; font: 11px monospace; }
+      button:hover { background: #1c2640; }
+      #live { background: #000; }
+    </style>
+  </head>
+  <body>
+    <div id="audio"></div>
+    <div id="out"></div>
+    <script type="module">
+      import { makeShipSprite, makeBossSprite } from '/src/art/ships.ts';
+      import { makePlanet, makeStar, makeStation, makeAsteroid, makeDerelict, drawAnomaly, drawBeacon } from '/src/art/planets.ts';
+      import { makeNebula, makeStarLayer } from '/src/art/background.ts';
+      import { makePortrait } from '/src/art/portraits.ts';
+      import { audio } from '/src/core/audio.ts';
+
+      const out = document.getElementById('out');
+      const section = (title) => {
+        const h = document.createElement('h2');
+        h.textContent = title;
+        out.appendChild(h);
+        const r = document.createElement('div');
+        r.className = 'row';
+        out.appendChild(r);
+        return r;
+      };
+      const cell = (row, cv, label) => {
+        const d = document.createElement('div');
+        d.className = 'cell';
+        d.appendChild(cv);
+        const l = document.createElement('div');
+        l.textContent = label;
+        d.appendChild(l);
+        row.appendChild(d);
+      };
+      const timed = (fn) => {
+        const t = performance.now();
+        const r = fn();
+        return [r, (performance.now() - t).toFixed(1)];
+      };
+
+      const FACTION = {
+        player: ['#8fa8c8', '#40c8ff'],
+        mercantile: ['#b89a6a', '#4a90c0'],
+        zealot: ['#e8e0d0', '#d4a030'],
+        hive: ['#6a8a3a', '#c040ff'],
+        machine: ['#606a78', '#ff3040'],
+        raider: ['#8a4a30', '#c8b040'],
+        ancient: ['#a8b8e0', '#60f0ff'],
+        warden: ['#202024', '#ff2030'],
+        monster: ['#5a3a6a', '#40ffd0'],
+        drone: ['#707880', '#ffb040'],
+      };
+      const styles = Object.keys(FACTION);
+      for (const st of styles) {
+        const row = section('ships: ' + st);
+        for (let s = 1; s <= 6; s++) {
+          const [p, q] = FACTION[st];
+          cell(row, makeShipSprite({ seed: s * 101, style: st, size: st === 'drone' ? 32 : 90, primary: p, secondary: q }), 'seed ' + s);
+        }
+        const [p, q] = FACTION[st];
+        cell(row, makeShipSprite({ seed: 1 * 101, style: st, size: 28, primary: p, secondary: q }), '28px');
+        cell(row, makeShipSprite({ seed: 1 * 101, style: st, size: 200, primary: p, secondary: q }), '200px');
+      }
+      {
+        const row = section('bosses');
+        for (const b of ['leviathan', 'dreadnought', 'warden_prime', 'hive_queen', 'choir_avatar']) cell(row, makeBossSprite(b, 260, 7), b);
+      }
+      {
+        const row = section('planets (r=80) + timing at r=200');
+        for (const k of ['rocky', 'ocean', 'gas', 'ice', 'lava', 'toxic', 'barren', 'crystal']) {
+          for (const s of [1, 2]) {
+            const [cv, ms] = timed(() => makePlanet(s * 37, k, 80));
+            cell(row, cv, `${k} ${ms}ms`);
+          }
+        }
+        const [, ms] = timed(() => makePlanet(5, 'ocean', 200));
+        const [big] = timed(() => makePlanet(9, 'gas', 200));
+        cell(row, big, `gas r200 (ocean r200: ${ms}ms)`);
+      }
+      {
+        const row = section('stars');
+        for (const c of ['#ffd27a', '#9bb8ff', '#ff6a40', '#ffffff']) cell(row, makeStar(c, 30), c);
+      }
+      {
+        const row = section('stations');
+        for (const st of ['neutral', 'mercantile', 'zealot', 'hive', 'machine', 'raider', 'ancient', 'warden']) cell(row, makeStation(3, st, 160), st);
+      }
+      {
+        const row = section('asteroids / derelicts');
+        for (let s = 1; s <= 6; s++) cell(row, makeAsteroid(s, 14 + s * 7), 'ast ' + s);
+        for (let s = 1; s <= 4; s++) cell(row, makeDerelict(s, 110), 'wreck ' + s);
+      }
+      {
+        const row = section('portraits');
+        const PA = { human: FACTION.player, mercantile: FACTION.mercantile, zealot: FACTION.zealot, hive: FACTION.hive, machine: FACTION.machine, raider: FACTION.raider, ancient: FACTION.ancient, warden: FACTION.warden };
+        for (const a of Object.keys(PA)) for (const s of [1, 2]) cell(row, makePortrait(s * 11, a, 160, PA[a][0], PA[a][1]), a);
+      }
+      {
+        const row = section('nebula + star layers (1024x512), anomalies & beacons (animated)');
+        const [neb, ms] = timed(() => makeNebula(4, 1024, 512, ['#5a2a8a', '#1a6a9a', '#a04060']));
+        const comp = document.createElement('canvas');
+        comp.width = 1024;
+        comp.height = 512;
+        const cx = comp.getContext('2d');
+        cx.drawImage(neb, 0, 0);
+        cx.drawImage(makeStarLayer(1, 1024, 512, 1, 0.8), 0, 0);
+        cx.drawImage(makeStarLayer(2, 1024, 512, 0.3, 1), 0, 0);
+        cell(row, comp, `nebula ${ms}ms`);
+        const live = document.createElement('canvas');
+        live.id = 'live';
+        live.width = 640;
+        live.height = 160;
+        cell(row, live, 'anomaly 0..3, beacons');
+        const lc = live.getContext('2d');
+        const loop = (ts) => {
+          const t = ts / 1000;
+          lc.fillStyle = '#000';
+          lc.fillRect(0, 0, 640, 160);
+          for (let k = 0; k < 4; k++) drawAnomaly(lc, 70 + k * 120, 80, 50, t, k);
+          drawBeacon(lc, 560, 50, 30, t, '#40ffb0');
+          drawBeacon(lc, 560, 120, 20, t, '#ffb040');
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+      }
+
+      // audio controls
+      const A = document.getElementById('audio');
+      const SFX = ['laser','laser_heavy','scatter','rail','missile','beam_start','arc','mine','flak','hit','hit_shield','hit_player','shield_break','explode_small','explode_big','pickup','credits','ui_click','ui_hover','ui_open','ui_close','levelup','jump_charge','jump','dock','warning','blink','ability','error','scan','boss_roar','thrust'];
+      const add = (label, fn) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.onclick = () => { audio.unlock(); fn(); };
+        A.appendChild(b);
+      };
+      A.appendChild(document.createTextNode('SFX: '));
+      for (const s of SFX) add(s, () => audio.sfx(s, { pan: (Math.random() - 0.5) }));
+      A.appendChild(document.createElement('br'));
+      A.appendChild(document.createTextNode('Mood: '));
+      for (const m of ['menu','calm','tense','combat','boss','victory','death','none']) add(m, () => audio.setMood(m));
+      let thr = 0;
+      add('thrust toggle', () => { thr = thr ? 0 : 1; });
+      add('spam lasers', () => { for (let i = 0; i < 40; i++) setTimeout(() => audio.sfx('laser', { pitch: 0.9 + Math.random() * 0.2 }), i * 10); });
+      setInterval(() => audio.setThrust(thr), 16);
+
+      // ?autotest: exercise every sfx & mood headlessly and report errors into the DOM
+      if (location.search.includes('autotest')) {
+        const log = document.createElement('pre');
+        log.id = 'autotest';
+        document.body.prepend(log);
+        const errs = [];
+        window.addEventListener('error', (e) => errs.push(String(e.message)));
+        try {
+          audio.unlock();
+          setTimeout(() => { for (const s of SFX) { try { audio.sfx(s, { vol: 0.5, pitch: 1.1, pan: 0.3 }); } catch (e) { errs.push(s + ': ' + e); } } errs.push('state=' + audio.getState?.()); }, 400);
+          for (const m of ['menu','calm','tense','combat','boss','victory','death','none','combat']) { try { audio.setMood(m); } catch (e) { errs.push(m + ': ' + e); } }
+          audio.setThrust(0.7);
+          audio.setVolumes(0.5, 0.5, 0.5);
+        } catch (e) { errs.push(String(e)); }
+        setTimeout(() => { log.textContent = 'AUTOTEST errors=' + errs.length + ' ' + errs.join(' | ') + ' vols=' + JSON.stringify(audio.getVolumes()); }, 1500);
+      }
+    </script>
+  </body>
+</html>
