@@ -481,8 +481,8 @@ export class Game {
     if (!run || run.outcome) return;
     run.outcome = { won, text };
     this.eventQueue = [];
-    // abandoning in the cradle carries nothing forward (prevents start/abandon farming)
-    const echoes = abandoned && run.stats.systems === 0 ? 0 : this.computeEchoes(run, won);
+    // a life that never left the cradle carries nothing forward (prevents start/die farming)
+    const echoes = !won && run.stats.systems === 0 ? 0 : this.computeEchoes(run, won);
     meta.echoes += echoes;
     meta.totalEchoes += echoes;
     if (won) {

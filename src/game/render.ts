@@ -631,7 +631,7 @@ export class Renderer {
       let label = '';
       if (world.nearest.kind === 'poi') {
         const poi = world.nearest.poi;
-        const verb = { planet: 'Survey', station: 'Dock at', derelict: 'Board', anomaly: 'Investigate', beacon: 'Approach', distress: 'Answer', asteroid: 'Probe', finale: 'Enter' }[poi.kind];
+        const verb = poi.site === 'marker' && poi.kind === 'station' ? 'Approach' : { planet: 'Survey', station: 'Dock at', derelict: 'Board', anomaly: 'Investigate', beacon: 'Approach', distress: 'Answer', asteroid: 'Probe', finale: 'Enter' }[poi.kind];
         label = `${verb} ${poi.name}`;
       } else label = `Hail ${world.nearest.ship.name}`;
       c.font = font(15, true);

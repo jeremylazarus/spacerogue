@@ -843,7 +843,7 @@ export class World {
     if (pressed('e') && this.nearest) {
       if (this.nearest.kind === 'poi') {
         const poi = this.nearest.poi;
-        if (poi.kind === 'station') {
+        if (poi.kind === 'station' && poi.site !== 'marker') {
           if (poi.hostileStation || (poi.owner && isHostileRep(this.run.rep[poi.owner.id] ?? 0))) {
             this.hooks.toast('Docking clearance denied.', '#f88');
             audio.sfx('error');
@@ -1050,7 +1050,7 @@ export class World {
   private fireBeam(s: Ship, ws: WeaponStats, aim: number, cc: number, cm: number) {
     const fromPlayer = s.allied;
     // fire-rate bonuses scale continuous damage (cooldown shrinks relative to the base)
-    const rate = ws.def.cooldown / Math.max(0.005, ws.cooldown);
+    const rate = s.allied ? ws.def.cooldown / Math.max(0.005, ws.cooldown) : 1;
     const dt = this.frameDt * rate * (s.overdrive > 0 ? 1.6 : 1);
     const x1 = s.x + Math.cos(s.angle) * s.radius * 0.8, y1 = s.y + Math.sin(s.angle) * s.radius * 0.8;
     const a = s.isPlayer ? aim : s.angle;
