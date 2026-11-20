@@ -304,7 +304,7 @@ const moSite: EventDef = {
             {
               label: '"Come aboard. You can figure it out with us."',
               run: (c) => {
-                const o = c.addOfficer('navigator');
+                const o = c.addOfficer('navigator', 'human', 'Ilse Varro');
                 finish(c, MO);
                 if (o) return 'joined';
                 c.giveRelic('old_map');
@@ -363,7 +363,7 @@ const moSite: EventDef = {
         {
           label: '"Come with me anyway."',
           run: (c) => {
-            if (c.addOfficer('navigator')) return 'joined';
+            if (c.addOfficer('navigator', 'human', 'Ilse Varro')) return 'joined';
             c.giveRelic('old_map');
             return 'noroom';
           },

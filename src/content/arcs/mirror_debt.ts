@@ -136,7 +136,7 @@ const site: EventDef = {
               run: (c) => {
                 advance(c, A, SITE, STAGES);
                 if (c.check('diplomacy', 2)) {
-                  if (c.addOfficer('quartermaster')) c.setFlag('arc.md.ruthe', true);
+                  if (c.addOfficer('quartermaster', 'human', 'Ruthe Calder')) c.setFlag('arc.md.ruthe', true);
                   return 'truth';
                 }
                 return 'truthFail';
@@ -146,7 +146,7 @@ const site: EventDef = {
               label: 'Be the captain she lost',
               run: (c) => {
                 advance(c, A, SITE, STAGES);
-                if (c.addOfficer('quartermaster')) {
+                if (c.addOfficer('quartermaster', 'human', 'Ruthe Calder')) {
                   c.setFlag('arc.md.ruthe', true);
                   c.setFlag('arc.md.lie', true);
                 }
@@ -228,7 +228,7 @@ const finale: EventDef = {
         },
         {
           label: 'Let Ruthe talk',
-          visible: (c) => is(c, 'arc.md.ruthe'),
+          visible: (c) => c.officers.some((o) => o.name === 'Ruthe Calder'),
           next: 'ruthe',
         },
         {
@@ -307,7 +307,7 @@ const epilogue: EventDef = {
             let e = is(c, 'arc.md.mercy')
               ? `You carry the other one home, or as close to home as a Wayfarer gets. Some nights you laugh at jokes you don't remember hearing.\n\n`
               : `The debt, whatever it was, goes unpaid. You find you don't miss it.\n\n`;
-            if (is(c, 'arc.md.ruthe')) e += `Ruthe stays on as quartermaster. She calls you "Captain" in a slightly different tone than she used to. You both pretend not to notice. `;
+            if (c.officers.some((o) => o.name === 'Ruthe Calder')) e += `Ruthe stays on as quartermaster. She calls you "Captain" in a slightly different tone than she used to. You both pretend not to notice. `;
             if (is(c, 'arc.md.paid') || is(c, 'arc.md.repaid')) e += `Across the Shoal, people who were owed something by a face like yours find their accounts quietly settled.`;
             c.victory(e);
           },

@@ -208,7 +208,7 @@ export interface EventCtx {
   loseItem(): string | null;
   changeRep(factionId: string, delta: number): void; // typical ±5..±30
   /** generate and add a new officer (random role if omitted). Returns them. Max 4 aboard; returns null if full. */
-  addOfficer(role?: OfficerRole, species?: string): Officer | null;
+  addOfficer(role?: OfficerRole, species?: string, name?: string): Officer | null; // pass name for story characters
   removeOfficer(id: string, reason?: string): void;
   /** reveal galaxy map node types up to n columns ahead */
   revealMap(columns: number): void;

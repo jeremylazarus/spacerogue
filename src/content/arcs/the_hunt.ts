@@ -170,7 +170,7 @@ const site: EventDef = {
               label: '"Come aboard. We run together."',
               run: (c) => {
                 advance(c, A, SITE, STAGES);
-                const o = c.addOfficer('spy', other(c).species);
+                const o = c.addOfficer('spy', other(c).species, 'Teodric Hesk');
                 if (o) c.setFlag('arc.th.ally', true);
                 else c.gainCredits(100);
                 return 'ally';
@@ -335,7 +335,7 @@ const epilogue: EventDef = {
           run: (c) => {
             c.setMetaFlag('hunt.prime_slain', true);
             let e = `The hunt is over. For a while, all across the Shoal, travellers linger where they like, and nothing comes to move them along.\n\n`;
-            if (is(c, 'arc.th.ally')) e += `Teodric opens a bar on a quiet station, the first in the Shoal with a permanent address. He keeps a stool for you. `;
+            if (c.officers.some((o) => o.name === 'Teodric Hesk')) e += `Teodric opens a bar on a quiet station, the first in the Shoal with a permanent address. He keeps a stool for you. `;
             else if (is(c, 'arc.th.bait')) e += `Sometimes you dream of a ship spinning in pale light, and a man who did not beg. `;
             e += `The singing in the lanes has a new voice in it now: a single note, held, that refuses to resolve. It sounds a lot like you.`;
             c.victory(e);

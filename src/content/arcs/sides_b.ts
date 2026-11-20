@@ -129,7 +129,7 @@ const abSite: EventDef = {
           label: '"Fly with me."',
           req: { apt: { diplomacy: 3 } },
           run: (c) => {
-            if (c.check('diplomacy', 3) && c.addOfficer('gunner', clan(c).species)) {
+            if (c.check('diplomacy', 3) && c.addOfficer('gunner', clan(c).species, 'Kestrel "Nine-Lives" Oduya')) {
               rep(c, clan(c), 10);
               c.journal('ace_bounty', '');
               lore(c, 'arc.ace_bounty');
@@ -202,7 +202,7 @@ const abWon: EventDef = {
           label: '"Your ninth life belongs to me now. Gunner\'s chair is open."',
           run: (c) => {
             c.journal('ace_bounty', '');
-            if (c.addOfficer('gunner', clan(c).species)) return 'joined';
+            if (c.addOfficer('gunner', clan(c).species, 'Kestrel "Nine-Lives" Oduya')) return 'joined';
             c.gainCredits(300);
             return 'spared';
           },
@@ -383,7 +383,7 @@ const pgSite: EventDef = {
     stay: {
       text: `He listens. He weeps a little. He takes his helmet off.\n\n"Not yet, then," he says. "I suppose they'll wait. They've waited this long." He stays aboard, and sings badly in the galley, and is happier than you've seen him.`,
       enter: (c) => {
-        if (!c.addOfficer('xenologist', zealotSpecies(c))) c.gainXp(40);
+        if (!c.addOfficer('xenologist', zealotSpecies(c), 'Ashvel Doon')) c.gainXp(40);
         lore(c, 'arc.pilgrimage');
         c.journal('pilgrimage', '');
       },

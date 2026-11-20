@@ -336,14 +336,15 @@ export class EventSession {
         run.rep[id] = clamp((run.rep[id] ?? 0) + d, -100, 100);
         self.add(`${f.short} regard ${d > 0 ? 'improved' : 'worsened'}`, d > 0 ? 'good' : 'bad');
       },
-      addOfficer: (role, species) => {
+      addOfficer: (role, species, name) => {
         if (run.officers.length >= 4) {
           self.add('No room aboard for another officer.', 'info');
           return null;
         }
         const o = makeOfficer(new RNG(rng.fork()), run.factions, role, species);
+        if (name) o.name = name;
         run.officers.push(o);
-        self.add(`${o.name} (${ROLE_NAME[o.role]}) joins your crew`, 'good');
+        self.add(`${o.name} (${ROLE_NAME[o.role]}) joins your crew — see the Captain screen (K)`, 'good');
         return o;
       },
       removeOfficer: (id, reason) => {
