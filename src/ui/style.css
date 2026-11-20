@@ -179,3 +179,6 @@ button { font: inherit; color: inherit; }
 
 .pause { width: 300px; }
 .pause .menu { width: auto; }
+.pip { color: var(--gold); font-size: 10px; vertical-align: middle; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+.btn.gold:hover:not(:disabled) { background: rgba(255, 210, 100, 0.25); border-color: rgba(255, 220, 130, 0.9); }

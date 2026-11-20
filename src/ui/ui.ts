@@ -65,6 +65,7 @@ export class UI implements UiBridge {
     this.root.appendChild(el);
     this.stack.push({ id, el, onClose });
     input.blocked = true;
+    this.hideTip();
     input.lmb = input.rmb = false;
   }
   private pop(silent = false) {
@@ -187,11 +188,11 @@ export class UI implements UiBridge {
       <div class="logo">SHOAL</div>
       <div class="sub">a voyage to the heart</div>
       <div class="menu">
-        ${hasSave ? '<button class="btn primary" data-a="continue">Continue Voyage</button>' : ''}
-        <button class="btn ${hasSave ? '' : 'primary'}" data-a="new">${meta.runs === 0 ? 'Wake' : 'Wake Again'}</button>
-        ${meta.runs > 0 ? '<button class="btn" data-a="legacy">Legacy</button>' : ''}
-        ${meta.codex.length > 0 ? '<button class="btn" data-a="codex">Codex</button>' : ''}
-        <button class="btn" data-a="settings">Settings</button>
+        ${hasSave ? '<button class="btn primary" data-a="continue" data-tip="continue">Continue Voyage</button>' : ''}
+        <button class="btn ${hasSave ? '' : 'primary'}" data-a="new" data-tip="new">${meta.runs === 0 ? 'Wake' : 'Wake Again'}</button>
+        ${meta.runs > 0 ? this.legacyButton() : ''}
+        ${meta.codex.length > 0 ? '<button class="btn" data-a="codex" data-tip="codex">Codex</button>' : ''}
+        <button class="btn" data-a="settings" data-tip="settings">Settings</button>
       </div>
       ${meta.runs > 0 ? `<div class="echo-count">◈ ${meta.echoes} Echoes · ${meta.runs} ${meta.runs === 1 ? 'life' : 'lives'}${meta.victories ? ` · ${meta.victories} reached the Heart` : ''}</div>` : ''}
       <div class="footer">Mouse & keyboard · best with sound on</div>`;
@@ -202,14 +203,47 @@ export class UI implements UiBridge {
         this.closeAll();
         if (!this.game.continueRun()) this.showTitle();
       } else if (a === 'new') {
+        this.hideTip();
         if (hasSave && !confirm('Abandon the voyage in progress?')) return;
         this.showHulls();
       } else if (a === 'legacy') this.showLegacy();
       else if (a === 'codex') this.showCodex();
       else if (a === 'settings') this.showSettings();
     });
+    this.bindMenuTips(o);
     this.push('title', o);
     audio.setMood('menu');
+  }
+
+  /** true if some Legacy purchase is affordable right now */
+  private legacyAffordable(): boolean {
+    return LEGACY.some((l) => {
+      if (l.needsDeed && !hasDeed(l.needsDeed)) return false;
+      if (l.id === 'hull.lancer' && hullUnlocked('lancer')) return false;
+      const cost = l.costs[perk(l.id)];
+      return cost !== undefined && meta.echoes >= cost;
+    });
+  }
+
+  private legacyButton(): string {
+    const afford = this.legacyAffordable();
+    return `<button class="btn ${afford ? 'gold' : ''}" data-a="legacy" data-tip="legacy">Legacy · ◈ ${meta.echoes}${afford ? ' <span class="pip">●</span>' : ''}</button>`;
+  }
+
+  private bindMenuTips(root: HTMLElement, only?: string) {
+    const afford = this.legacyAffordable();
+    const TIPS: Record<string, () => string> = {
+      continue: () => 'Resume the voyage in progress, from your last arrival in a system.',
+      new: () => (meta.runs === 0 ? 'Begin your first voyage.' : 'Begin a new voyage. Everything you have unlocked in Legacy comes with you; the voyage itself is new.') + (this.game.hasSave() ? '<div class="cmp">This abandons the voyage in progress.</div>' : ''),
+      legacy: () => `Spend Echoes ◈ on permanent unlocks that carry into every future voyage. This does not start a game.<div class="cmp">You have ◈ ${meta.echoes}.${afford ? ' <span style="color:var(--gold)">Something is affordable now.</span>' : ''}</div>`,
+      codex: () => 'What you remember: lore recovered across all your lives.',
+      settings: () => 'Volume, screen shake, damage numbers, and erasing progress.',
+      again: () => 'Back to ship selection for a new voyage. Your unlocks carry over.',
+    };
+    root.querySelectorAll<HTMLElement>(only ? `[data-tip="${only}"]` : '[data-tip]').forEach((el) => {
+      const f = TIPS[el.dataset.tip!];
+      if (f) this.bindTip(el, f);
+    });
   }
 
   showHulls() {
@@ -978,6 +1012,14 @@ export class UI implements UiBridge {
     });
     this.push('legacy', o, () => {
       if (this.top()?.id === 'title') this.showTitle();
+      const top = this.top();
+      if (top?.id === 'summary') {
+        const old = top.el.querySelector<HTMLElement>('[data-a="legacy"]');
+        if (old) {
+          old.outerHTML = this.legacyButton();
+          this.bindMenuTips(top.el, 'legacy');
+        }
+      }
     });
   }
 
@@ -1066,7 +1108,7 @@ export class UI implements UiBridge {
         <div><span>Ships destroyed</span><span>${run.stats.kills}</span></div><div><span>Encounters</span><span>${run.stats.events}</span></div>
       </div>
       <div class="echo">◈ +${echoes} Echoes</div>
-      <div class="row" style="justify-content:center"><button class="btn primary" data-a="again">Wake again</button><button class="btn" data-a="legacy">Legacy</button></div>
+      <div class="row" style="justify-content:center"><button class="btn primary" data-a="again" data-tip="again">Wake again</button>${this.legacyButton()}</div>
     </div></div>`;
     o.addEventListener('click', (e) => {
       const a = (e.target as HTMLElement).closest('[data-a]')?.getAttribute('data-a');
@@ -1079,6 +1121,7 @@ export class UI implements UiBridge {
       }
       if (a === 'legacy') this.showLegacy();
     });
+    this.bindMenuTips(o);
     this.push('summary', o);
   }
 
