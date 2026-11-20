@@ -168,7 +168,7 @@ export const PLANET_EVENTS: EventDef[] = [
             run: (ctx) => {
               ctx.loseCredits(cr(ctx, 10));
               rep(ctx, 12);
-              ctx.note('You leave with a reduced fee, a loyalty card, and the officer\'s private recommendation for a decent fuel depot.');
+              ctx.note('You leave with a reduced fee, a loyalty card, and the officer\'s private recommendation for a decent thread-chandler.');
               ctx.gainFuel(1);
             },
           },
@@ -287,7 +287,7 @@ export const PLANET_EVENTS: EventDef[] = [
       },
       drone: {
         text:
-          'The drone wakes, takes inventory, and is visibly relieved that someone came. It asks where you are going. You say: deeper.\n\nIt gives you a canister marked HEART-HARDY and the coordinates of a fuel cache the vault builders left "for the next gardener."',
+          'The drone wakes, takes inventory, and is visibly relieved that someone came. It asks where you are going. You say: deeper.\n\nIt gives you a canister marked HEART-HARDY and the coordinates of a thread cache the vault builders left "for the next gardener."',
         enter: (ctx) => {
           ctx.setFlag('ev_seeds', 1);
           ctx.gainFuel(3);

@@ -153,10 +153,10 @@ export const HAIL_EVENTS: EventDef[] = [
     nodes: {
       start: {
         text:
-          '"Hail, traveller! Hail and hosanna! We are pilgrims bound for the Heart, where the Song is sung whole. Our engine has fallen silent, as is the will of the Song, surely. And yet. If thou hast fuel to spare, the Song would surely smile upon thee."\n\nTheir ship is held together with prayer ribbons. Literally.',
+          '"Hail, traveller! Hail and hosanna! We are pilgrims bound for the Heart, where the Song is sung whole. Our engine has fallen silent, as is the will of the Song, surely. And yet. If thou hast thread to spare, the Song would surely smile upon thee."\n\nTheir ship is held together with prayer ribbons. Literally.',
         choices: [
           {
-            label: 'Give them 2 fuel.',
+            label: 'Give them 2 spools of thread.',
             req: { fuel: 3 },
             run: (ctx) => {
               ctx.loseFuel(2);
@@ -178,7 +178,7 @@ export const HAIL_EVENTS: EventDef[] = [
             },
           },
           {
-            label: 'Sell them fuel at a pilgrim\'s markup.',
+            label: 'Sell them thread at a pilgrim\'s markup.',
             req: { fuel: 2 },
             run: (ctx) => {
               ctx.loseFuel(1);
@@ -309,7 +309,7 @@ export const HAIL_EVENTS: EventDef[] = [
               if (it) {
                 rep(ctx, 15);
                 ctx.gainFuel(3);
-                ctx.note(`"${it.toUpperCase()}. crunchy. we give warm fuel in return. it is from inside us. do not ask."`);
+                ctx.note(`"${it.toUpperCase()}. crunchy. we give warm thread in return. it is from inside us. do not ask."`);
               } else {
                 ctx.note('You have nothing to spare. "sad. we are sad with you."');
               }
@@ -655,7 +655,7 @@ export const HAIL_EVENTS: EventDef[] = [
           'A heavily armed corsair drops out of the lane next to you. On the comm: the bride, now very much unmarried, wearing what appears to be the Baron\'s hat.\n\n"Told you I\'d owe you. I always pay. Take your pick, Captain."',
         choices: [
           { label: 'A weapon from the Baron\'s collection.', run: (ctx) => ctx.giveItem({ slot: 'weapon', minRarity: 2 }) },
-          { label: 'A full tank and a hull patch.', run: (ctx) => { ctx.gainFuel(5); ctx.repairHull(ctx.maxHull); } },
+          { label: 'A heap of thread and a hull patch.', run: (ctx) => { ctx.gainFuel(5); ctx.repairHull(ctx.maxHull); } },
           {
             label: 'Join my crew.',
             run: (ctx) => {
@@ -716,7 +716,7 @@ export const HAIL_EVENTS: EventDef[] = [
         },
       },
       wayfarer: {
-        text: '"...WAYFARER." The word takes a long time, and is said gently. "WE. REMEMBER. THE. FIRST. OF. YOU." It says nothing more. But your nav charts are suddenly, quietly, complete.',
+        text: '"...WAYFARER." The word takes a long time, and is said gently. "WE. REMEMBER. THE. FIRST. OF. YOU." It says nothing more. But the lanes ahead feel suddenly, quietly, clearer.',
         enter: (ctx) => {
           rep(ctx, 15);
           ctx.revealMap(3);

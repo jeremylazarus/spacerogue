@@ -262,3 +262,21 @@ button { font: inherit; color: inherit; }
 .set input[type='checkbox'] { accent-color: var(--amber); width: 18px; height: 18px; }
 .pause { width: 340px; }
 .pause .menu { width: auto; }
+
+/* the Loom */
+.tapestry { display: flex; gap: 3px; height: 34px; align-items: stretch; margin-bottom: 4px; }
+.tapestry .band { flex: 1; border-radius: 2px; opacity: 0.85; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.12) 0 3px, transparent 3px 7px); }
+.tapestry .band.future { background: rgba(168,116,47,0.12); opacity: 1; }
+.tapestry .band.narrows { background: rgba(255,140,120,0.22); }
+.tapestry .band.heart { background: rgba(255,255,255,0.35); }
+.strand { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; border: 1px solid color-mix(in srgb, var(--sc) 45%, transparent); background: rgba(10,8,5,0.6); }
+.strand:hover { background: color-mix(in srgb, var(--sc) 10%, rgba(10,8,5,0.6)); }
+.strand.on { border-color: var(--sc); background: color-mix(in srgb, var(--sc) 20%, rgba(10,8,5,0.6)); box-shadow: 0 0 12px color-mix(in srgb, var(--sc) 35%, transparent); }
+.strand .sg { font-size: 22px; color: var(--sc); width: 26px; text-align: center; }
+.strand b { display: block; color: var(--sc); }
+.strand .key { font-family: var(--font-mono, monospace); color: var(--amber); opacity: 0.7; }
+.forecast { padding: 10px 14px; border: 1px solid rgba(168,116,47,0.35); background: rgba(10,8,5,0.5); line-height: 1.55; min-height: 140px; }
+.ledger .fac { padding: 8px 0; border-bottom: 1px solid rgba(168,116,47,0.18); }
+.ledger .pips { display: flex; gap: 3px; margin: 5px 0; }
+.ledger .pips i { width: 16px; height: 6px; background: rgba(255,255,255,0.08); }
+.ledger .pips i.on { background: var(--fc); box-shadow: 0 0 6px var(--fc); }

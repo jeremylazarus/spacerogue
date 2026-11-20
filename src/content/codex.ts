@@ -15,7 +15,7 @@ export const CODEX: CodexEntry[] = [
     id: 'frag.origin.2',
     category: FRAG,
     title: 'II. Correction',
-    body: `"A note held too long becomes a dissonance. We correct dissonance."\n\nThe wardens are not soldiers. They have no crews, only cradles, empty and warm. They come for travellers who linger, and for travellers who return too many times.\n\nThey are hands. Something larger is moving them. Something that is trying to stay in tune.`,
+    body: `"A note held too long becomes a dissonance. We correct dissonance."\n\nThe wardens are not soldiers. They have no crews, only cradles, empty and warm. They climb out of the Tide for travellers who linger, and they come for travellers who return too many times.\n\nThey are hands. Something larger is moving them. Something that is trying to stay in tune.`,
   },
   {
     id: 'frag.origin.3',

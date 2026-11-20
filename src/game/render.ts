@@ -1,3 +1,5 @@
+import { LOOM_SIZE, STRAND_GLYPH } from './weave';
+import { drawAnchor, drawAnchorHalo, drawGrafts, drawThread, drawTide } from './render_thread';
 import { TAU, clamp, dist } from '../core/math';
 import { input } from '../core/input';
 import { hashSeed } from '../core/rng';
@@ -164,7 +166,18 @@ export class Renderer {
     }
     // POIs
     for (const poi of world.pois) {
-      if (!inView(poi.x, poi.y, poi.r * 2)) continue;
+      if (!inView(poi.x, poi.y, poi.r * 2 + 60) || poi.erased) continue;
+      if (poi.kind === 'anchor') {
+        drawAnchor(c, poi, t, z);
+        if (poi.discovered && dist(poi.x, poi.y, p.x, p.y) < 1400) {
+          c.font = `${13 / z}px "Chakra Petch", "Segoe UI", system-ui, sans-serif`;
+          c.textAlign = 'center';
+          c.fillStyle = poi.woven ? 'rgba(169,154,128,0.45)' : poi.anchorColor ?? '#ffd36b';
+          c.fillText(poi.name, poi.x, poi.y + 64);
+        }
+        continue;
+      }
+      drawAnchorHalo(c, poi, t, z);
       if (poi.sprite) {
         const sw = poi.sprite.width;
         c.save();
@@ -207,7 +220,7 @@ export class Renderer {
     for (const k of world.pickups) {
       if (!inView(k.x, k.y, 20)) continue;
       const pulse = 1 + Math.sin(t * 6 + k.x) * 0.2;
-      const col = k.kind === 'credits' ? '#ffd76a' : k.kind === 'repair' ? '#7f7' : k.kind === 'energy' ? '#8cf' : k.kind === 'fuel' ? '#8ef' : RARITY_COLORS[k.module!.rarity];
+      const col = k.kind === 'credits' ? '#ffd76a' : k.kind === 'repair' ? '#7f7' : k.kind === 'energy' ? '#8cf' : k.kind === 'thread' ? '#bff' : RARITY_COLORS[k.module!.rarity];
       c.globalCompositeOperation = 'lighter';
       const sz = k.kind === 'module' ? 9 : k.kind === 'credits' ? 3.5 : 6;
       c.fillStyle = col;
@@ -251,6 +264,8 @@ export class Renderer {
       c.arc(s.x, s.y, s.r * f, 0, TAU);
       c.fill();
     }
+    drawTide(c, world, vx0, vy0, vx1, vy1, t, z);
+    drawThread(c, world, t, z);
     // ships
     for (const s of world.ships) if (!s.dead && inView(s.x, s.y, s.radius * 2) && !(s.isPlayer && world.playerDead)) this.drawShip(s, world);
     // projectiles
@@ -413,6 +428,7 @@ export class Renderer {
     const scale = s.boss === 'mirror' ? 1.4 : 1;
     c.scale(scale, scale);
     c.drawImage(s.sprite, -sw / 2, -sh / 2);
+    if (s.isPlayer) drawGrafts(c, world.run, s.radius, world.t);
     if (s.flash > 0 || s.tint) {
       c.globalCompositeOperation = 'lighter';
       c.globalAlpha = s.flash > 0 ? 0.6 : 0.25 * alpha;
@@ -431,12 +447,26 @@ export class Renderer {
       const y = s.y - s.radius - 12;
       c.fillStyle = 'rgba(0,0,0,0.5)';
       c.fillRect(s.x - w / 2, y, w, 4);
-      c.fillStyle = s.allied ? '#7f7' : s.hostile ? '#f66' : '#fd6';
+      const bindable = s.hostile && !s.allied && s.hull <= s.maxHull * world.thread.bindThreshold(s);
+      c.fillStyle = s.tethered ? '#9ff' : s.allied ? '#7f7' : bindable ? (Math.sin(world.t * 8) > 0 ? '#bff' : '#f66') : s.hostile ? '#f66' : '#fd6';
       c.fillRect(s.x - w / 2, y, (w * Math.max(0, s.hull)) / s.maxHull, 4);
       if (s.maxShield > 0) {
         c.fillStyle = '#7cf';
         c.fillRect(s.x - w / 2, y - 3, (w * s.shield) / s.maxShield, 2);
       }
+      // the bind mark: below this, a loop of thread will hold it
+      if (s.hostile && !s.allied) {
+        const th = world.thread.bindThreshold(s);
+        c.fillStyle = '#bff';
+        c.fillRect(s.x - w / 2 + w * th - 1, y - 3, 2, 10);
+      }
+    }
+    if (s.stun > 0 && !s.allied) {
+      c.strokeStyle = 'rgba(180,255,255,0.6)';
+      c.lineWidth = 1.5;
+      c.beginPath();
+      c.arc(s.x, s.y, s.radius + 8, world.t * 4, world.t * 4 + 4);
+      c.stroke();
     }
     // name tags for elites/neutrals near the cursor
     if (!s.isPlayer && !s.allied && (s.elite || dist(input.worldX, input.worldY, s.x, s.y) < s.radius + 30)) {
@@ -644,16 +674,33 @@ export class Renderer {
       this.txt(val, x, ly + 48, color, MONO(24), 'left', 8);
     };
     col(lx + 16, 'CREDITS', `${run.credits}`, GOLD);
-    const fuelLow = run.fuel <= 1 && Math.sin(world.t * 6) > 0;
-    col(lx + 130, 'FUEL', `${run.fuel}/${world.stats.maxFuel}`, fuelLow ? RED : TEAL);
-    col(lx + 222, 'LEVEL', `${run.level}`, AMBER);
+    const threadLow = run.thread < 6 && Math.sin(world.t * 6) > 0;
+    col(lx + 130, 'THREAD', `${Math.floor(run.thread)}/${Math.round(world.stats.maxThread)}`, threadLow ? RED : world.thread.spinning ? '#dff' : TEAL);
+    col(lx + 232, 'LEVEL', `${run.level}`, AMBER);
     const xpf = clamp(run.xp / xpForLevel(run.level), 0, 1);
     c.fillStyle = 'rgba(0,0,0,0.6)';
     c.fillRect(lx + 16, ly + 64, lw - 32, 6);
     c.fillStyle = '#c9a0ff';
     c.fillRect(lx + 16, ly + 64, (lw - 32) * xpf, 6);
     this.txt('EXPERIENCE', lx + 16, ly + 84, 'rgba(201,160,255,0.75)', UI(10, 600));
-    let ny = ly + lh + 24;
+    // the Loom: carried strands
+    const sy0 = ly + lh + 8;
+    this.plate(lx, sy0, lw, 40, 10);
+    this.txt('LOOM · M', lx + 14, sy0 + 25, DIM, UI(11, 600));
+    for (let i = 0; i < LOOM_SIZE; i++) {
+      const s = run.strands[i];
+      const bx = lx + 84 + i * 70;
+      c.strokeStyle = s ? s.color : 'rgba(168,116,47,0.35)';
+      c.lineWidth = 1.5;
+      c.strokeRect(bx, sy0 + 8, 62, 24);
+      if (s) {
+        c.fillStyle = s.color + '30';
+        c.fillRect(bx, sy0 + 8, 62, 24);
+        this.txt(STRAND_GLYPH[s.kind], bx + 12, sy0 + 26, s.color, UI(15, 600), 'center');
+        this.txt(s.label.length > 7 ? s.label.slice(0, 6) + '…' : s.label, bx + 22, sy0 + 25, '#efe6d2', UI(10, 600));
+      }
+    }
+    let ny = sy0 + 40 + 24;
     if (run.skillPoints > 0) {
       const a = 0.78 + 0.22 * Math.sin(world.t * 4);
       c.globalAlpha = a;
@@ -721,7 +768,7 @@ export class Renderer {
     if (showCard) {
       const a = clamp(40 - world.arrivalT, 0, 1);
       c.globalAlpha = a;
-      const lines: [string, string][] = [['W / S', 'thrust'], ['A / D', 'strafe'], ['MOUSE', 'aim · click to fire'], ['SHIFT', 'boost'], ['SPACE', 'ship ability'], ['E', 'interact'], ['M', 'star map'], ['TAB · K · J', 'ship · captain · journal'], ['SCROLL', 'zoom'], ['ESC', 'pause']];
+      const lines: [string, string][] = [['W / S', 'thrust'], ['A / D', 'strafe'], ['MOUSE', 'aim · click to fire'], ['SHIFT', 'boost'], ['SPACE', 'ship ability'], ['E', 'interact'], ['Q (HOLD)', 'spin thread'], ['M', 'the Loom'], ['TAB · K · J', 'ship · captain · journal'], ['SCROLL', 'zoom'], ['ESC', 'pause']];
       const cw = 300, chh = 20 + lines.length * 22;
       const cx0 = W - cw - 18;
       const overlapsRow = wx0 + total > cx0 && rowY > H - chh - 18 - wph;
@@ -740,7 +787,7 @@ export class Renderer {
       let label = '';
       if (world.nearest.kind === 'poi') {
         const poi = world.nearest.poi;
-        const verb = poi.site === 'marker' && poi.kind === 'station' ? 'Approach' : { planet: 'Survey', station: 'Dock at', derelict: 'Board', anomaly: 'Investigate', beacon: 'Approach', distress: 'Answer', asteroid: 'Probe', finale: 'Enter' }[poi.kind];
+        const verb = poi.site === 'marker' && poi.kind === 'station' ? 'Approach' : { planet: 'Survey', station: 'Dock at', derelict: 'Board', anomaly: 'Investigate', beacon: 'Approach', distress: 'Answer', asteroid: 'Probe', finale: 'Enter', anchor: 'Loop' }[poi.kind];
         label = `${verb} ${poi.name}`;
       } else label = `Hail ${world.nearest.ship.name}`;
       c.font = UI(17, 600);
@@ -758,19 +805,25 @@ export class Renderer {
 
     // ---- jump status
     if (world.jump) {
-      const tgt = run.nodes.find((n) => n.id === world.jump!.target)!;
       const pct = Math.round((world.jump.t / world.jump.total) * 100);
-      this.txt(`JUMP DRIVE → ${tgt.name.toUpperCase()}  ${pct}%`, W / 2, promptY - 16, TEAL, UI(16, 600), 'center', 8);
-      if (world.hasHostilesNear) this.txt('HOSTILES NEARBY · SPOOL SLOWED', W / 2, promptY - 38, RED, UI(13, 600), 'center');
+      this.txt(`WEAVING → ${world.jump.node.name.toUpperCase()}  ${pct}%`, W / 2, promptY - 16, TEAL, UI(16, 600), 'center', 8);
+      if (world.hasHostilesNear) this.txt('HOSTILES NEARBY · WEAVE SLOWED', W / 2, promptY - 38, RED, UI(13, 600), 'center');
     }
 
-    // ---- warden unease
-    if (world.wardenWarned && world.node.kind !== 'final') {
-      const rem = world.wardenTime - world.arrivalT;
-      const a = rem > 0 ? 0.55 + Math.sin(world.t * 3) * 0.3 : 0.9;
-      c.globalAlpha = a;
-      this.txt(rem > 0 ? '◈ the lane is restless' : '◈ they are here', W / 2, H - 92, '#e6e0ff', STORY(20, 500), 'center', 10);
+    // ---- the Tide
+    const th = world.thread;
+    if (th.tideOn && th.tideWarned) {
+      const gap = th.tideGap(p.x, p.y);
+      const risen = th.tideRisen;
+      const close = risen && gap < 900;
+      c.globalAlpha = close ? 0.75 + Math.sin(world.t * 8) * 0.25 : 0.55 + Math.sin(world.t * 3) * 0.3;
+      const msg = !risen ? '◈ behind you, the Tide is rising' : th.held ? '◈ the Tide waits, as if watching' : gap < 0 ? '◈ YOU ARE IN THE TIDE' : `◈ the Tide · ${Math.round(gap / 10)} lengths behind you`;
+      this.txt(msg, W / 2, H - 92, close ? '#ffb0a8' : '#e6e0ff', STORY(20, 500), 'center', 10);
       c.globalAlpha = 1;
+    }
+    // ---- tethers
+    if (th.tethers.length) {
+      this.txt(`TOWING ${th.tethers.length}/${th.maxTethers} · HOLD F REEL IN · R CUT LOOSE · OR DRAG INTO THE TIDE`, W / 2, H - 120, '#bff', UI(13, 600), 'center', 6);
     }
 
     this.drawMinimap(world);
@@ -831,6 +884,29 @@ export class Renderer {
     c.lineTo(cx, cy + R);
     c.stroke();
     const p = world.player;
+    // the Tide, eating the scope from one side
+    const th = world.thread;
+    if (th.tideOn && th.tideRisen) {
+      const d = th.tideDir, f = th.front * scale;
+      const px = -d.y, py = d.x, L = R * 3;
+      c.fillStyle = 'rgba(200,200,220,0.28)';
+      c.beginPath();
+      c.moveTo(cx + d.x * f - px * L, cy + d.y * f - py * L);
+      c.lineTo(cx + d.x * f + px * L, cy + d.y * f + py * L);
+      c.lineTo(cx + d.x * (f + L) + px * L, cy + d.y * (f + L) + py * L);
+      c.lineTo(cx + d.x * (f + L) - px * L, cy + d.y * (f + L) - py * L);
+      c.closePath();
+      c.fill();
+    }
+    // anchors still holding a strand
+    for (const a of world.pois) {
+      if (!a.anchor || a.woven || a.erased || !a.discovered) continue;
+      c.strokeStyle = a.anchorColor ?? '#bff';
+      c.lineWidth = 1;
+      c.beginPath();
+      c.arc(cx + a.x * scale, cy + a.y * scale, 4.5, 0, TAU);
+      c.stroke();
+    }
     c.strokeStyle = 'rgba(79,224,200,0.22)';
     c.beginPath();
     c.arc(cx + p.x * scale, cy + p.y * scale, world.stats.scanRange * scale, 0, TAU);

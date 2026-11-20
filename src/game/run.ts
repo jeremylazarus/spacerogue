@@ -5,8 +5,11 @@ import { HULLS, RELICS, baseStats, hullDef, nextUid, rollModule, rollRarity, set
 import { SKILLS, skillById, xpForLevel } from './skills';
 import { alienName, factionNames, humanName, shipName, systemName } from './names';
 import { meta, perk, unlockedSet } from './meta';
+import { FINAL_STEP, type Strand } from './weave';
+import { HULL_SOCKETS, graftApt, graftsMod, type GraftInst } from './grafts';
+import { initExodus, type Ambition } from './exodus';
 
-export type NodeKind = 'start' | 'empty' | 'station' | 'hostile' | 'nebula' | 'derelict' | 'anomaly' | 'haven' | 'final';
+export type NodeKind = 'start' | 'empty' | 'station' | 'hostile' | 'nebula' | 'derelict' | 'anomaly' | 'haven' | 'final' | 'narrows';
 export type Hazard = 'none' | 'nebula' | 'asteroids' | 'radiation' | 'ionstorm';
 
 export interface GNode {
@@ -23,10 +26,16 @@ export interface GNode {
   seed: number;
   known: boolean;
   visited: boolean;
+  /** planet kinds woven in (first planets take these kinds and are rich) */
+  planets?: string[];
+  /** extra woven features: 'derelict' | 'anomaly' | 'wrack' | 'scarred' | 'stronghold' | 'guest:<fid>' */
+  extras?: string[];
 }
 
 export interface Marker {
-  nodeId: number;
+  /** voyage step at which the site appears (rolls forward if missed) */
+  step: number;
+  nodeId?: number;
   eventId: string;
   label: string;
   kind: 'beacon' | 'wreck' | 'station' | 'anomaly' | 'planet';
@@ -34,7 +43,7 @@ export interface Marker {
 }
 
 export interface RunState {
-  v: 1;
+  v: 2;
   seed: number;
   runNumber: number;
   resonance: number;
@@ -42,17 +51,33 @@ export interface RunState {
   captain: string;
   shipName: string;
   finalDepth: number;
+  /** danger tier 0..finalDepth (what content and scaling read) */
   depth: number;
+  /** voyage step 0..FINAL_STEP (one per jump) */
+  step: number;
   nodeId: number;
+  /** systems visited so far, in order (the last is the current one) */
   nodes: GNode[];
+  /** strands carried on the Loom */
+  strands: Strand[];
+  strandUid: number;
+  /** each faction's heartland, as a voyage step */
+  fcenter: Record<string, number>;
   hull: number;
   weapons: (ModuleInst | null)[];
   utils: (ModuleInst | null)[];
   cargo: ModuleInst[];
+  /** graft sockets on the hull */
+  grafts: (GraftInst | null)[];
+  /** torn-out grafts waiting to be fitted */
+  graftHold: GraftInst[];
+  /** exodus: each faction's strength 0..10, and what it wants */
+  strength?: Record<string, number>;
+  ambitions?: Ambition[];
   relics: RelicId[];
   officers: Officer[];
   credits: number;
-  fuel: number;
+  thread: number;
   xp: number;
   level: number;
   skillPoints: number;
@@ -66,12 +91,12 @@ export interface RunState {
   finaleEvent: string | null;
   markers: Marker[];
   usedEvents: string[];
-  stats: { kills: number; systems: number; creditsEarned: number; bosses: number; events: number; killsThisStreak: number; peacefulSystems: number };
+  stats: { kills: number; systems: number; creditsEarned: number; bosses: number; events: number; killsThisStreak: number; peacefulSystems: number; bound?: number; released?: number; stripped?: number; unravelled?: number };
   log: string[];
   outcome: null | { won: boolean; text: string };
   uidMax: number;
   /** per-system state that must survive save/continue */
-  sys: { nodeId: number; used: number[]; arrivalDone: boolean; t: number; saint: boolean; shunt: boolean; frozen: boolean; kills: number; gone?: string[]; hailed?: string[]; waves?: number; next?: number };
+  sys: { nodeId: number; used: number[]; arrivalDone: boolean; t: number; saint: boolean; shunt: boolean; frozen: boolean; kills: number; gone?: string[]; hailed?: string[]; waves?: number; next?: number; rock?: number; woven?: number[]; tt?: number; px?: number; py?: number; str?: Record<string, number> };
   /** fights with narrative follow-ups that must survive save/continue */
   pending: { nodeId: number; spec: import('./api').CombatSpec; cleared?: boolean }[];
   peaceful: number;
@@ -131,7 +156,10 @@ export function createRun(seed: number, hullId: string, resonance: number, mainA
     rep[f.id] = base[f.archetype] + rng.int(-10, 10);
   }
   const finalDepth = 7;
-  const nodes = genGalaxy(new RNG(rng.fork()), factions, finalDepth);
+  const fcenter: Record<string, number> = {};
+  for (const f of factions) fcenter[f.id] = f.archetype === 'ancient' ? rng.range(FINAL_STEP - 3.5, FINAL_STEP - 1) : f.archetype === 'raider' ? FINAL_STEP / 2 : rng.range(1, FINAL_STEP - 2);
+  const start: GNode = { id: 0, col: 0, row: 0, x: 0, y: 0, name: systemName(new RNG(rng.fork())), kind: 'start', hazard: 'none', owner: null, links: [], seed: rng.fork(), known: true, visited: false, planets: [], extras: [] };
+  const nodes = [start];
   const unlocked = unlockedSet();
   const weapons: (ModuleInst | null)[] = Array(hull.weaponSlots).fill(null);
   const utils: (ModuleInst | null)[] = Array(hull.utilSlots).fill(null);
@@ -140,8 +168,9 @@ export function createRun(seed: number, hullId: string, resonance: number, mainA
   const cargo: ModuleInst[] = [];
   if (perk('perk.module') > 0) cargo.push(rollModule(rng, { rarity: perk('perk.module') >= 2 ? 2 : 1, unlocked }));
   const run: RunState = {
-    v: 1, seed, runNumber: Math.max(1, meta.runs), resonance, hullId, captain: humanName(rng), shipName: shipName(rng), finalDepth, depth: 0, nodeId: 0, nodes,
-    hull: 0, weapons, utils, cargo, relics: [], officers: [], credits: 80 + perk('perk.credits') * 60, fuel: 6 + perk('perk.fuel'), xp: 0, level: 1,
+    v: 2, seed, runNumber: Math.max(1, meta.runs), resonance, hullId, captain: humanName(rng), shipName: shipName(rng), finalDepth, depth: 0, step: 0, nodeId: 0, nodes,
+    strands: [], strandUid: 0, fcenter,
+    hull: 0, weapons, utils, cargo, grafts: Array(HULL_SOCKETS[hullId] ?? 2).fill(null), graftHold: [], relics: [], officers: [], credits: 80 + perk('perk.credits') * 60, thread: 30 + perk('perk.fuel') * 8, xp: 0, level: 1,
     skillPoints: perk('perk.skill'), skills: {}, flags: {}, rep, factions, mainArc, sideArcs: sideArcIds.map((id) => ({ id, at: rng.int(1, 3), begun: false })),
     journal: {}, finaleEvent: null, markers: [], usedEvents: [],
     stats: { kills: 0, systems: 0, creditsEarned: 0, bosses: 0, events: 0, killsThisStreak: 0, peacefulSystems: 0 }, log: [], outcome: null, uidMax: 0,
@@ -152,81 +181,8 @@ export function createRun(seed: number, hullId: string, resonance: number, mainA
   // avoid same ship name as last life
   if (meta.lastShips[0] === run.shipName) run.shipName = shipName(rng);
   run.hull = computeStats(run).maxHull;
+  initExodus(run, new RNG(rng.fork()));
   return run;
-}
-
-function genGalaxy(rng: RNG, factions: Faction[], finalDepth: number): GNode[] {
-  const nodes: GNode[] = [];
-  const cols: GNode[][] = [];
-  let id = 0;
-  for (let c = 0; c <= finalDepth; c++) {
-    const n = c === 0 || c === finalDepth ? 1 : rng.int(3, 4);
-    const col: GNode[] = [];
-    for (let r = 0; r < n; r++) {
-      const y = n === 1 ? 0.5 : 0.12 + (0.76 * r) / (n - 1) + rng.range(-0.05, 0.05);
-      const node: GNode = {
-        id: id++, col: c, row: r, x: 0.06 + (0.88 * c) / finalDepth + rng.range(-0.02, 0.02), y, name: systemName(rng),
-        kind: 'empty', hazard: 'none', owner: null, links: [], seed: rng.fork(), known: c <= 1, visited: false,
-      };
-      col.push(node);
-      nodes.push(node);
-    }
-    cols.push(col);
-  }
-  // links: each node to 1-2 nearest in next col; ensure all next nodes reachable
-  for (let c = 0; c < finalDepth; c++) {
-    const a = cols[c], b = cols[c + 1];
-    for (const n of a) {
-      const sorted = [...b].sort((p, q) => Math.abs(p.y - n.y) - Math.abs(q.y - n.y));
-      const k = b.length === 1 ? 1 : rng.chance(0.55) ? 2 : 1;
-      for (let i = 0; i < k; i++) if (!n.links.includes(sorted[i].id)) n.links.push(sorted[i].id);
-    }
-    for (const m of b) {
-      if (!a.some((n) => n.links.includes(m.id))) {
-        const nearest = [...a].sort((p, q) => Math.abs(p.y - m.y) - Math.abs(q.y - m.y))[0];
-        nearest.links.push(m.id);
-      }
-    }
-  }
-  // territories: each non-raider faction gets a centre
-  const centers = factions.filter((f) => f.archetype !== 'raider').map((f) => ({ f, c: rng.range(1, finalDepth - 1), y: rng.range(0.1, 0.9) }));
-  const ancient = centers.find((x) => x.f.archetype === 'ancient');
-  if (ancient) ancient.c = rng.range(finalDepth - 2.5, finalDepth - 1);
-  const raider = factions.find((f) => f.archetype === 'raider')!;
-  for (const n of nodes) {
-    if (n.col === 0) {
-      n.kind = 'start';
-      continue;
-    }
-    if (n.col === finalDepth) {
-      n.kind = 'final';
-      n.name = 'The Heart';
-      continue;
-    }
-    let best: (typeof centers)[0] | null = null;
-    let bd = 1e9;
-    for (const ce of centers) {
-      const d = Math.hypot((ce.c - n.col) / 2.2, ce.y - n.y);
-      if (d < bd) {
-        bd = d;
-        best = ce;
-      }
-    }
-    n.owner = best && bd < (best.f.archetype === 'ancient' ? 0.5 : 0.85) ? best.f.id : null;
-    if (!n.owner && rng.chance(0.45)) n.owner = raider.id;
-    const r = rng.next();
-    n.kind = r < 0.22 ? 'station' : r < 0.38 ? 'hostile' : r < 0.5 ? 'derelict' : r < 0.6 ? 'anomaly' : r < 0.68 ? 'nebula' : r < 0.74 ? 'haven' : 'empty';
-    n.hazard = n.kind === 'nebula' ? 'nebula' : rng.chance(0.25) ? rng.pick(['asteroids', 'radiation', 'ionstorm', 'asteroids'] as Hazard[]) : 'none';
-  }
-  // guarantee a station somewhere in each of cols 1-2 and 4-5
-  for (const [a, b] of [[1, 2], [4, 5]]) {
-    const cand = nodes.filter((n) => n.col >= a && n.col <= b);
-    if (!cand.some((n) => n.kind === 'station')) rng.pick(cand).kind = 'station';
-  }
-  // the column before the finale always offers a haven or station
-  const pen = nodes.filter((n) => n.col === finalDepth - 1);
-  if (!pen.some((n) => n.kind === 'station' || n.kind === 'haven')) rng.pick(pen).kind = 'station';
-  return nodes;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +197,7 @@ export function computeStats(run: RunState): Stats {
   const h = hullDef(run.hullId);
   applyMod(s, h.mod);
   for (const u of run.utils) if (u) applyMod(s, utilMods(u));
+  for (const m of graftsMod(run)) applyMod(s, m);
   for (const [id, rank] of Object.entries(run.skills)) {
     const sk = skillById(id);
     if (sk?.mod && rank > 0) applyMod(s, sk.mod, rank);
@@ -250,7 +207,7 @@ export function computeStats(run: RunState): Stats {
     if (m) applyMod(s, m);
   }
   s.maxHull += perk('perk.hull') * 15;
-  s.maxFuel += perk('perk.fuel');
+  s.maxThread += perk('perk.fuel') * 8;
   if (run.relics.includes('glass_heart')) s.maxHull *= 0.7;
   // resonance: player is not weakened; enemies are strengthened elsewhere
   s.maxHull = Math.max(20, Math.round(s.maxHull));
@@ -274,6 +231,7 @@ export function aptitude(run: RunState, a: Aptitude): number {
   let v = 1;
   for (const [id, rank] of Object.entries(run.skills)) v += (skillById(id)?.apt?.[a] ?? 0) * rank;
   for (const o of run.officers) if (ROLE_APT[o.role] === a) v += 2;
+  v += graftApt(run, a);
   if (run.relics.includes('hollow_idol')) v += 1;
   if (a === 'diplomacy' && run.relics.includes('pilgrim_lamp')) v += 1;
   for (const u of run.utils) {
@@ -338,11 +296,13 @@ export function serializeRun(run: RunState): string {
 export function deserializeRun(json: string): RunState | null {
   try {
     const r = JSON.parse(json) as RunState;
-    if (r.v !== 1 || !HULLS.some((h) => h.id === r.hullId)) return null;
+    if (r.v !== 2 || !HULLS.some((h) => h.id === r.hullId)) return null;
     setUidCounter(r.uidMax + 1);
     r.sys ??= { nodeId: r.nodeId, used: [], arrivalDone: true, t: 0, saint: false, shunt: false, frozen: false, kills: 0 };
     r.pending ??= [];
     r.peaceful ??= 0;
+    r.grafts ??= [];
+    r.graftHold ??= [];
     return r;
   } catch {
     return null;

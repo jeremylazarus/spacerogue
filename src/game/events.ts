@@ -6,7 +6,12 @@ import { EVENTS, EVENT_CODEX } from '../content/events';
 import { ARC_EVENTS } from '../content/arcs';
 import { CODEX } from '../content/codex';
 import { RELICS, moduleName, moduleValue, rollModule, rollRarity, type Stats } from './items';
-import { aptitude, computeStats, makeOfficer, nodeById, type RunState } from './run';
+import { aptitude, computeStats, makeOfficer, type RunState } from './run';
+import { FINAL_STEP, stepForTier } from './weave';
+import { attitude } from './grafts';
+
+/** content speaks of 'fuel cells'; one cell is this much thread */
+export const THREAD_PER_FUEL = 4;
 import { meta, saveMeta, unlockedSet } from './meta';
 
 export const ALL_EVENTS: EventDef[] = [...EVENTS, ...ARC_EVENTS];
@@ -168,7 +173,7 @@ export class EventSession {
     const run = this.host.run;
     if (r.apt) for (const [a, v] of Object.entries(r.apt)) if (aptitude(run, a as Aptitude) < (v as number)) return false;
     if (r.credits !== undefined && run.credits < r.credits) return false;
-    if (r.fuel !== undefined && run.fuel < r.fuel) return false;
+    if (r.fuel !== undefined && run.thread < r.fuel * THREAD_PER_FUEL) return false;
     if (r.officer && !run.officers.some((o) => o.role === r.officer)) return false;
     if (r.relic && !run.relics.includes(r.relic)) return false;
     return true;
@@ -180,7 +185,7 @@ export class EventSession {
     const parts: string[] = [];
     if (r.apt) for (const [a, v] of Object.entries(r.apt)) parts.push(`${APT_NAME[a as Aptitude]} ${v}`);
     if (r.credits !== undefined) parts.push(`${r.credits}¢`);
-    if (r.fuel !== undefined) parts.push(`${r.fuel} fuel`);
+    if (r.fuel !== undefined) parts.push(`${r.fuel * THREAD_PER_FUEL} thread`);
     if (r.officer) parts.push(ROLE_NAME[r.officer]);
     if (r.relic) parts.push(RELICS[r.relic].name);
     return parts.join(', ');
@@ -221,7 +226,7 @@ export class EventSession {
         return run.credits;
       },
       get fuel() {
-        return run.fuel;
+        return Math.floor(run.thread / THREAD_PER_FUEL);
       },
       get hull() {
         return Math.round(host.getHull());
@@ -234,7 +239,10 @@ export class EventSession {
       },
       apt: (a) => aptitude(run, a),
       officer: (role) => (role ? run.officers.find((o) => o.role === role) ?? null : run.officers[0] ?? null),
-      rep: (id) => run.rep[id] ?? 0,
+      rep: (id) => {
+        const f = run.factions.find((x) => x.id === id);
+        return f ? attitude(run, f) : run.rep[id] ?? 0;
+      },
       hasRelic: (id) => run.relics.includes(id),
       flag: (n) => run.flags[n],
       setFlag: (n, v) => {
@@ -270,17 +278,17 @@ export class EventSession {
         self.add(`−${n} credits`, 'bad');
       },
       gainFuel: (n) => {
-        const max = host.stats().maxFuel;
-        const before = run.fuel;
-        run.fuel = Math.max(run.fuel, Math.min(max, run.fuel + n));
-        if (run.fuel > before) self.add(`+${run.fuel - before} fuel`, 'good');
-        else self.add('Fuel tanks already full', 'info');
+        const max = host.stats().maxThread;
+        const before = run.thread;
+        run.thread = Math.max(run.thread, Math.min(max, run.thread + n * THREAD_PER_FUEL));
+        if (run.thread > before) self.add(`+${Math.round(run.thread - before)} thread`, 'good');
+        else self.add('Your spools are already full', 'info');
       },
       loseFuel: (n) => {
-        const l = Math.min(run.fuel, n);
+        const l = Math.min(run.thread, n * THREAD_PER_FUEL);
         if (l <= 0) return;
-        run.fuel -= l;
-        self.add(`−${l} fuel`, 'bad');
+        run.thread -= l;
+        self.add(`−${Math.round(l)} thread`, 'bad');
       },
       damageHull: (n) => {
         const h = host.getHull();
@@ -354,12 +362,11 @@ export class EventSession {
         self.add(`${o.name} ${reason ?? 'has left the crew'}`, 'bad');
       },
       revealMap: (cols) => {
-        let n = 0;
-        for (const node of run.nodes) if (node.col > run.depth && node.col <= run.depth + cols && !node.known) {
-          node.known = true;
-          n++;
-        }
-        if (n) self.add('Star charts updated', 'info');
+        // there is no chart to reveal: the lanes ahead feel clearer, which is worth a little thread
+        const max = host.stats().maxThread;
+        const before = run.thread;
+        run.thread = Math.min(max, Math.max(run.thread, run.thread + 2 + cols));
+        if (run.thread > before) self.add(`The lanes ahead feel clearer (+${Math.round(run.thread - before)} thread)`, 'info');
       },
       unlockCodex: (id) => {
         if (meta.codex.includes(id)) return;
@@ -372,25 +379,11 @@ export class EventSession {
         self.combats.push(spec);
       },
       placeMarker: (o) => {
-        const cur = nodeById(run, run.nodeId);
-        const targetCol = cur.col + Math.max(1, o.colOffset);
-        if (targetCol > run.finalDepth - 1) return false;
-        // nodes reachable from current
-        let frontier = new Set([cur.id]);
-        for (let c = cur.col; c < targetCol; c++) {
-          const nf = new Set<number>();
-          for (const id of frontier) for (const l of nodeById(run, id).links) nf.add(l);
-          frontier = nf;
-        }
-        const cands = [...frontier].filter((id) => !run.markers.some((m) => m.nodeId === id && !m.done));
-        const pool = cands.length ? cands : [...frontier];
-        if (!pool.length) return false;
-        // mark every reachable node in the column so the player can't route around the arc
-        const picks = pool;
-        for (const nid of picks) {
-          run.markers.push({ nodeId: nid, eventId: o.eventId, label: o.label, kind: o.kind ?? 'beacon', done: false });
-          nodeById(run, nid).known = true;
-        }
+        const tier = run.depth + Math.max(1, o.colOffset);
+        if (tier > run.finalDepth - 1) return false;
+        // the site surfaces in whatever system is woven at that depth (and rolls forward if missed)
+        const step = Math.min(FINAL_STEP - 1, Math.max(run.step + 1, stepForTier(tier, run.finalDepth)));
+        run.markers.push({ step, eventId: o.eventId, label: o.label, kind: o.kind ?? 'beacon', done: false });
         return true;
       },
       journal: (arcId, text) => {

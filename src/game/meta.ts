@@ -15,6 +15,10 @@ export interface MetaSave {
   settings: { master: number; sfx: number; music: number; shake: boolean; damageNumbers: boolean };
   seenCodex: string[];
   lastShips: string[]; // names of previous ships, most recent first
+  /** former selves who died in the Shoal and linger in it (SPOILERS) */
+  remnants: Remnant[];
+  /** crews you cut loose, by archetype: they remember */
+  kindred: Record<string, number>;
 }
 
 const KEY = 'spacerogue.meta.v1';
@@ -25,7 +29,7 @@ function fresh(): MetaSave {
     version: 1, echoes: 0, totalEchoes: 0, runs: 0, victories: 0, maxResonance: 0, perks: {}, deeds: [], codex: [], metaFlags: {},
     life: { kills: 0, deaths: 0, bestDepth: 0, bosses: 0, systems: 0 },
     settings: { master: 0.8, sfx: 0.8, music: 0.55, shake: true, damageNumbers: true },
-    seenCodex: [], lastShips: [],
+    seenCodex: [], lastShips: [], remnants: [], kindred: {},
   };
 }
 
@@ -102,7 +106,7 @@ export const LEGACY: LegacyItem[] = [
   { id: 'mod.leech', name: 'Leech Coil schematics', desc: 'Leech Coils can now be found.', costs: [80], group: 'Arsenal', needsDeed: 'deed.relics3' },
   { id: 'perk.credits', name: 'Hidden Stash', desc: '+60 starting credits per rank.', costs: [25, 50, 90], group: 'Inheritance' },
   { id: 'perk.hull', name: 'Scar Tissue', desc: '+15 max hull per rank.', costs: [40, 80, 130], group: 'Inheritance' },
-  { id: 'perk.fuel', name: 'Lane Memory', desc: '+1 starting and max fuel per rank.', costs: [40, 90], group: 'Inheritance' },
+  { id: 'perk.fuel', name: 'Lane Memory', desc: '+8 starting and max thread per rank.', costs: [40, 90], group: 'Inheritance' },
   { id: 'perk.skill', name: 'Muscle Memory', desc: '+1 starting skill point per rank.', costs: [50, 100, 170], group: 'Inheritance' },
   { id: 'perk.module', name: 'Heirloom', desc: 'Start with an extra module (rank 2: a better one).', costs: [60, 140], group: 'Inheritance' },
   { id: 'perk.officer', name: 'Old Friend', desc: 'Start with an officer aboard.', costs: [120], group: 'Inheritance' },
@@ -137,4 +141,16 @@ export function unlockedSet(): Set<string> {
   const s = new Set<string>();
   for (const [k, v] of Object.entries(meta.perks)) if (v > 0) s.add(k);
   return s;
+}
+
+export interface Remnant {
+  ship: string;
+  captain: string;
+  hullId: string;
+  depth: number;
+  /** their best weapon at death (module instance JSON) */
+  weapon: unknown;
+  killerArch: string | null;
+  killerName: string | null;
+  run: number;
 }

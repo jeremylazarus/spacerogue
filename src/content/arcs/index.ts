@@ -8,8 +8,23 @@ import { MIRROR_DEBT, MIRROR_DEBT_EVENTS } from './mirror_debt';
 import { ORIGIN, ORIGIN_EVENTS } from './origin';
 import { SIDES_A, SIDES_A_EVENTS } from './sides_a';
 import { SIDES_B, SIDES_B_EVENTS } from './sides_b';
+import { LAST_WEAVER, LAST_WEAVER_EVENTS } from './last_weaver';
+import { NARROWS_TRUCE, NARROWS_TRUCE_EVENTS } from './narrows_truce';
+import { TIDEWALKER, TIDEWALKER_EVENTS } from './tidewalker';
 
-export const ARCS: ArcDef[] = [SILENT_BEACON, SCHISM, THE_HUNT, HIVE_BLOOM, MIRROR_DEBT, ORIGIN, ...SIDES_A, ...SIDES_B];
+export const ARCS: ArcDef[] = [
+  SILENT_BEACON,
+  SCHISM,
+  THE_HUNT,
+  HIVE_BLOOM,
+  MIRROR_DEBT,
+  ORIGIN,
+  LAST_WEAVER,
+  ...SIDES_A,
+  ...SIDES_B,
+  NARROWS_TRUCE,
+  TIDEWALKER,
+];
 
 export const ARC_EVENTS: EventDef[] = [
   WAKE,
@@ -21,4 +36,7 @@ export const ARC_EVENTS: EventDef[] = [
   ...ORIGIN_EVENTS,
   ...SIDES_A_EVENTS,
   ...SIDES_B_EVENTS,
+  ...LAST_WEAVER_EVENTS,
+  ...NARROWS_TRUCE_EVENTS,
+  ...TIDEWALKER_EVENTS,
 ];

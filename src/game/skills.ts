@@ -34,6 +34,7 @@ export const SKILLS: SkillNode[] = [
   { id: 'g_overcharge', tree: 'gunnery', name: 'Overcharge', desc: 'While your shields are down, weapons fire 30% faster.', max: 1, req: ['g_rate'], col: 1, row: 2, flag: 'overcharge' },
   { id: 'g_crit2', tree: 'gunnery', name: 'Killing Blow', desc: '+40% critical damage per rank.', max: 2, req: ['g_crit'], col: 2, row: 2, mod: { critMult: 0.4 } },
   { id: 'g_exec', tree: 'gunnery', name: 'Executioner', desc: '+50% damage against badly damaged targets.', max: 1, req: ['g_crit2', 'g_overcharge'], col: 1, row: 3, flag: 'exec' },
+  { id: 'g_bind', tree: 'gunnery', name: "Binder's Eye", desc: 'Loops of thread hold ships that are 8% healthier per rank.', max: 2, req: ['g_ram', 'g_exec'], col: 0, row: 3 },
   { id: 'g_storm', tree: 'gunnery', name: 'Storm of Steel', desc: 'Every 10th trigger pull of each weapon fires an extra volley.', max: 1, req: ['g_exec', 'g_ram'], col: 1, row: 4, flag: 'storm' },
   // Engineering
   { id: 'e_hull', tree: 'engineering', name: 'Reinforced Frame', desc: '+15 hull per rank.', max: 3, col: 0, row: 0, mod: { maxHull: 15 } },
@@ -47,12 +48,13 @@ export const SKILLS: SkillNode[] = [
   { id: 'e_drone', tree: 'engineering', name: 'Drone Wright', desc: 'An escort drone joins you.', max: 1, req: ['e_salvage'], col: 2, row: 2, mod: { drones: 1 } },
   { id: 'e_shunt', tree: 'engineering', name: 'Emergency Shunt', desc: 'Once per system, near death, shields flash back to full.', max: 1, req: ['e_regen', 'e_ability'], col: 0, row: 3, flag: 'shunt' },
   { id: 'e_pd', tree: 'engineering', name: 'Flak Screen', desc: 'Point defense against missiles. Drones hit harder.', max: 1, req: ['e_drone', 'e_ability'], col: 2, row: 3, mod: { pointDefense: 2 }, flag: 'dronedmg' },
+  { id: 'e_spool', tree: 'engineering', name: 'Deep Spools', desc: '+10 max thread per rank.', max: 2, req: ['e_ability'], col: 1, row: 3, mod: { maxThread: 10 } },
   { id: 'e_overload', tree: 'engineering', name: 'Overload', desc: 'When your shields break, they detonate outward.', max: 1, req: ['e_shunt', 'e_pd'], col: 1, row: 4, flag: 'overload' },
   // Wayfinding
   { id: 'w_speed', tree: 'wayfinding', name: 'Light Touch', desc: '+20 speed and +35 thrust per rank.', max: 3, col: 0, row: 0, mod: { maxSpeed: 20, thrust: 35 } },
   { id: 'w_diplo', tree: 'wayfinding', name: 'Silver Tongue', desc: '+1 Diplomacy aptitude per rank.', max: 2, col: 1, row: 0, apt: { diplomacy: 1 } },
   { id: 'w_sci', tree: 'wayfinding', name: 'Curious Mind', desc: '+1 Science aptitude per rank.', max: 2, col: 2, row: 0, apt: { science: 1 } },
-  { id: 'w_nav', tree: 'wayfinding', name: 'Lane Sense', desc: '+1 Navigation aptitude and +1 max fuel per rank.', max: 2, req: ['w_speed'], col: 0, row: 1, apt: { navigation: 1 }, mod: { maxFuel: 1 } },
+  { id: 'w_nav', tree: 'wayfinding', name: 'Lane Sense', desc: '+1 Navigation aptitude and +4 max thread per rank.', max: 2, req: ['w_speed'], col: 0, row: 1, apt: { navigation: 1 }, mod: { maxThread: 4 } },
   { id: 'w_guile', tree: 'wayfinding', name: "Smuggler's Grin", desc: '+1 Guile aptitude per rank.', max: 2, req: ['w_diplo'], col: 1, row: 1, apt: { guile: 1 } },
   { id: 'w_scan', tree: 'wayfinding', name: 'Wide Eyes', desc: 'Much longer scanner range. Learn 15% faster.', max: 1, req: ['w_sci'], col: 2, row: 1, mod: { scanRange: 400, xpMult: 0.15 } },
   { id: 'w_boost', tree: 'wayfinding', name: 'Slipstream', desc: 'Afterburner is 25% stronger per rank.', max: 2, req: ['w_nav'], col: 0, row: 2, mod: { boostMult: 0.25 } },
@@ -60,7 +62,8 @@ export const SKILLS: SkillNode[] = [
   { id: 'w_luck', tree: 'wayfinding', name: 'Fortune', desc: 'Salvage tends to be finer.', max: 2, req: ['w_scan'], col: 2, row: 2, mod: { luck: 1 } },
   { id: 'w_dodge', tree: 'wayfinding', name: 'Ghost Pilot', desc: '+6% chance for shots to miss you per rank.', max: 2, req: ['w_boost'], col: 0, row: 3, mod: { dodge: 0.06 } },
   { id: 'w_envoy', tree: 'wayfinding', name: 'Envoy', desc: 'Factions start warmer toward you. +1 Diplomacy and Guile.', max: 1, req: ['w_trade', 'w_luck'], col: 2, row: 3, apt: { diplomacy: 1, guile: 1 }, flag: 'envoy' },
-  { id: 'w_drift', tree: 'wayfinding', name: 'Lane Drifter', desc: 'Jumps spool faster. Sometimes, lanes give back fuel.', max: 1, req: ['w_dodge', 'w_envoy'], col: 1, row: 4, flag: 'drift' },
+  { id: 'w_tether', tree: 'wayfinding', name: 'Second Line', desc: 'Tow one more bound ship.', max: 1, req: ['w_dodge', 'w_trade'], col: 1, row: 3 },
+  { id: 'w_drift', tree: 'wayfinding', name: 'Lane Drifter', desc: 'Jumps spool faster. Sometimes, lanes give back thread.', max: 1, req: ['w_dodge', 'w_envoy'], col: 1, row: 4, flag: 'drift' },
 ];
 
 export const skillById = (id: string) => SKILLS.find((s) => s.id === id)!;

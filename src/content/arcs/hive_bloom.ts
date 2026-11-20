@@ -170,7 +170,7 @@ const site: EventDef = {
               },
             },
             {
-              label: 'Burn straight through (2 fuel)',
+              label: 'Burn straight through (2 spools of thread)',
               visible: (c) => !is(c, 'arc.hb.joined'),
               req: { fuel: 2 },
               run: (c) => {

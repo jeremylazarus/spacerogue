@@ -334,7 +334,7 @@ const epilogue: EventDef = {
           label: 'Hold the note',
           run: (c) => {
             c.setMetaFlag('hunt.prime_slain', true);
-            let e = `The hunt is over. For a while, all across the Shoal, travellers linger where they like, and nothing comes to move them along.\n\n`;
+            let e = `The hunt is over. For a while, all across the Shoal, travellers linger where they like, and nothing comes to move them along but, eventually, the Tide.\n\n`;
             if (c.officers.some((o) => o.name === 'Teodric Hesk')) e += `Teodric opens a bar on a quiet station, the first in the Shoal with a permanent address. He keeps a stool for you. `;
             else if (is(c, 'arc.th.bait')) e += `Sometimes you dream of a ship spinning in pale light, and a man who did not beg. `;
             e += `The singing in the lanes has a new voice in it now: a single note, held, that refuses to resolve. It sounds a lot like you.`;

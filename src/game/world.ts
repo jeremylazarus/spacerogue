@@ -5,12 +5,17 @@ import { audio, type Sfx } from '../core/audio';
 import type { BossId, CombatSpec, Faction, FactionArchetype } from './api';
 import { hullDef, moduleName, rollModule, weaponStats, type ModuleInst, type Stats, type WeaponStats } from './items';
 import { computeStats, factionById, hasSkillFlag, isHostileRep, lootRarity, systemSeed, type GNode, type RunState } from './run';
-import { unlockedSet, meta } from './meta';
+import { unlockedSet, meta, saveMeta } from './meta';
 import type { FloatText, LineFx, Particle, Pickup, POI, Proj, ProjKind, Rock, Role, Ship, WeaponSlot } from './entities';
 import { makeBossSprite, makeShipSprite, type ShipStyle } from '../art/ships';
 import { makeAsteroid, makeDerelict, makePlanet, makeStar, makeStation, type PlanetKind } from '../art/planets';
 import { hashSeed } from '../core/rng';
 import { systemName as genSysName, planetName } from './names';
+import { ThreadSys } from './thread';
+import { atWar, shiftStrength } from './exodus';
+import { GRAFT_HOLD, GRAFTS, attitude, hasGraftFlag, installed } from './grafts';
+import type { StrandKind } from './weave';
+import type { Hazard } from './run';
 
 export interface WorldHooks {
   toast(msg: string, color?: string): void;
@@ -18,7 +23,7 @@ export interface WorldHooks {
   dock(p: POI): void;
   hail(s: Ship): void;
   death(): void;
-  jumped(nodeId: number): void;
+  jumped(j: { node: GNode; strandIds: number[]; cost: number; dry: boolean }): void;
   combatWon(afterVictory: string | undefined): void;
   groupCleared(afterVictory: string | undefined): void;
   levelUp(levels: number): void;
@@ -123,11 +128,12 @@ export class World {
   star: { x: number; y: number; r: number; color: string; sprite: HTMLCanvasElement } | null = null;
   bounds = 4300;
   gravityWells: { x: number; y: number; r: number; str: number }[] = [];
-  wardenTime: number;
-  wardenWarned = false;
-  wardenWaves = 0;
-  wardenNext = 0;
-  jump: { target: number; t: number; total: number } | null = null;
+  thread!: ThreadSys;
+  jump: { node: GNode; strandIds: number[]; cost: number; dry: boolean; t: number; total: number } | null = null;
+  /** set by the graft system: tear a part from a reeled-in hulk (returns false if none) */
+  stripGraft?: (s: Ship, rng: RNG) => boolean;
+  /** extra credit multiplier on kills (scarred systems pay better) */
+  creditMult = 1;
   groups = new Map<number, CombatGroup>();
   groupCounter = 1;
   shake = 0;
@@ -157,6 +163,13 @@ export class World {
   sysName: string;
   owner: Faction | null;
   hasHostilesNear = false;
+  /** who last hurt the player (for remembering how a life ended) */
+  lastHitBy: { arch: string; name: string } | null = null;
+  kindredCalled = false;
+  strSnap: Record<string, number> = {};
+  str(fid: string): number {
+    return this.strSnap[fid] ?? 5;
+  }
 
   constructor(run: RunState, hooks: WorldHooks) {
     this.run = run;
@@ -165,9 +178,10 @@ export class World {
     this.rng = new RNG(systemSeed(run, this.node));
     this.sysName = this.node.name;
     this.owner = factionById(run, this.node.owner);
-    const nav = 0;
-    this.wardenTime = (this.node.kind === 'start' ? 300 : 220) + nav;
+    // faction strengths as they stood on arrival: a reload must rebuild the same system
+    this.strSnap = run.sys.nodeId === this.node.id && run.sys.str ? run.sys.str : { ...(run.strength ?? {}) };
     this.build();
+    run.sys.str = this.strSnap;
   }
 
   // -------------------------------------------------------------------------
@@ -187,14 +201,18 @@ export class World {
     }
     // planets
     const kinds: PlanetKind[] = ['rocky', 'ocean', 'gas', 'ice', 'lava', 'toxic', 'barren', 'crystal'];
-    const np = node.kind === 'final' ? 2 : rng.int(2, 5);
+    const woven = (node.planets ?? []) as PlanetKind[];
+    const np = node.kind === 'final' ? 2 : Math.max(woven.length + 1, rng.int(2, 5));
     let orbitR = 800;
     for (let i = 0; i < np; i++) {
       orbitR += rng.range(450, 800);
-      const kind = rng.pick(kinds);
+      const rolled = rng.pick(kinds);
+      const kind = i < woven.length ? woven[i] : rolled;
       const r = kind === 'gas' ? rng.range(110, 170) : rng.range(50, 100);
       const p = this.addPoi('planet', planetName(rng, node.name, i), r, 'planet', orbitR, rng.range(0, TAU));
       p.planetKind = kind;
+      p.anchor = 'planet';
+      if (i < woven.length) p.rich = true;
       p.sprite = makePlanet(rng.fork(), kind, r);
       p.discovered = true;
       p.orbit!.speed = rng.range(0.004, 0.012) * (rng.chance(0.5) ? 1 : -1) * (1600 / orbitR);
@@ -208,6 +226,8 @@ export class World {
       st.sprite = makeStation(rng.fork(), node.kind === 'haven' ? 'neutral' : owner?.archetype ?? 'neutral', 150);
       st.discovered = true;
       st.orbit!.speed *= 0.4;
+      st.anchor = 'station';
+      st.anchorHaven = node.kind === 'haven';
       if (node.kind === 'haven') st.name = `${genSysName(rng)} Haven`;
     }
     // misc POIs
@@ -219,12 +239,42 @@ export class World {
         if (kind === 'derelict') p.sprite = makeDerelict(rng.fork(), rng.range(70, 120));
         if (kind === 'asteroid') p.sprite = makeAsteroid(rng.fork(), 60);
         p.anomalyKind = rng.int(0, 3);
+        if (kind === 'derelict' || kind === 'anomaly') p.anchor = kind;
       }
     };
+    const extras = node.extras ?? [];
     if (node.kind === 'derelict') add('derelict', rng.int(2, 3));
     else if (rng.chance(0.3)) add('derelict', 1);
     if (node.kind === 'anomaly') add('anomaly', rng.int(1, 2));
     else if (rng.chance(0.18)) add('anomaly', 1);
+    if (extras.includes('derelict')) add('derelict', 1);
+    if (extras.includes('anomaly')) add('anomaly', 1);
+    if (extras.includes('wrack')) add('derelict', 2);
+    if (extras.includes('scarred')) this.creditMult = 1.5;
+    // lane anchors: the owner's beacon, passing exodus traffic, and scars in the lanes
+    if (node.kind !== 'final') {
+      const beacon = (f: Faction) => {
+        const a = this.addAnchor('faction', `${f.short} lane-beacon`, 0, 0);
+        const ang = rng.range(0, TAU), rr = rng.range(1100, this.bounds - 600);
+        a.x = Math.cos(ang) * rr;
+        a.y = Math.sin(ang) * rr;
+        a.owner = f;
+        a.anchorColor = f.color;
+      };
+      if (owner && !(this.str(owner.id) < 0.5)) beacon(owner);
+      const passing = run.factions.filter((f) => f !== owner && !(this.str(f.id) < 0.5));
+      const pool = passing.filter((f) => node.kind !== 'start' || f.archetype !== 'raider');
+      if (pool.length && (node.kind === 'start' || rng.chance(owner ? 0.45 : 0.8))) beacon(rng.pick(pool));
+      if (node.kind !== 'start' || rng.chance(0.5)) {
+        const haz = node.hazard !== 'none' && rng.chance(0.7) ? node.hazard : rng.pick(['asteroids', 'radiation', 'ionstorm', 'nebula'] as Hazard[]);
+        if (node.hazard !== 'none' || rng.chance(0.4)) {
+          const ang = rng.range(0, TAU), rr = rng.range(1000, this.bounds - 500);
+          const a = this.addAnchor('scar', 'Lane scar', Math.cos(ang) * rr, Math.sin(ang) * rr);
+          a.hazard = haz;
+          a.anchorColor = '#ff9a6a';
+        }
+      }
+    }
     if (rng.chance(0.25) && node.kind !== 'final' && node.kind !== 'start') add('distress', 1);
     // hazards
     if (node.hazard === 'asteroids' || rng.chance(0.25)) {
@@ -244,7 +294,7 @@ export class World {
     }
     // markers
     run.markers.forEach((m, idx) => {
-      if (m.nodeId !== node.id || m.done) return;
+      if (m.step !== run.step || m.done || node.kind === 'final') return;
       const kind = m.kind === 'planet' ? 'beacon' : m.kind === 'wreck' ? 'derelict' : m.kind === 'station' ? 'station' : m.kind === 'anomaly' ? 'anomaly' : 'beacon';
       const p = this.addPoi(kind as 'beacon', m.label, kind === 'station' ? 70 : 50, 'marker', rng.range(1000, this.bounds - 600), rng.range(0, TAU), true);
       p.markerIdx = idx;
@@ -273,23 +323,38 @@ export class World {
     if (node.hazard === 'nebula') this.hazardTint = 'rgba(120,80,160,0.10)';
     if (node.hazard === 'radiation') this.hazardTint = 'rgba(160,200,60,0.06)';
     if (node.hazard === 'ionstorm') this.hazardTint = 'rgba(80,140,255,0.06)';
-    let wt = this.wardenTime;
-    if (run.relics.includes('warden_key')) wt *= 1.5;
-    if (run.relics.includes('hollow_idol')) wt *= 0.75;
-    wt *= 1 - run.resonance * 0.05;
-    this.wardenTime = wt;
+    this.thread = new ThreadSys(this);
+    this.stripGraft = (s, r) => this.tearGraft(s, r);
     // restore per-system state after a save/continue
     if (run.sys.nodeId === node.id) {
       // story sites rely on their marker's own done flag (their positional ids shift once earlier ones are done)
       for (const p of this.pois) if (p.markerIdx < 0 && run.sys.used.includes(p.id)) p.used = true;
       this.arrivalT = run.sys.t;
-      this.wardenWarned = this.wardenTime - this.arrivalT < 30;
+      const th = this.thread;
+      th.tideT = run.sys.tt ?? run.sys.t;
+      th.tideWarned = th.tideGrace - th.tideT < 25;
+      if (th.tideOn && th.tideT >= th.tideGrace) {
+        th.tideRisen = true;
+        th.spawnWrack(); // seeded: same wrack, same ids as before the reload
+      }
+      for (const p of this.pois) if (run.sys.woven?.includes(p.id)) p.woven = true;
+      // put the ship back where it was (never inside the Tide)
+      if (run.sys.px !== undefined && run.sys.py !== undefined) {
+        this.player.x = run.sys.px;
+        this.player.y = run.sys.py;
+      }
+      const gap = th.tideGap(this.player.x, this.player.y);
+      if (gap < 600) {
+        this.player.x -= th.tideDir.x * (600 - gap);
+        this.player.y -= th.tideDir.y * (600 - gap);
+      }
+      th.rockThread = run.sys.rock ?? 0;
       this.saintUsed = run.sys.saint;
       this.shuntUsed = run.sys.shunt;
       this.frozenUsed = run.sys.frozen;
       this.killsHere = run.sys.kills;
-      this.wardenWaves = run.sys.waves ?? 0;
-      this.wardenNext = run.sys.next ?? 0;
+      th.handsWaves = run.sys.waves ?? 0;
+      th.handsNext = run.sys.next ?? 20;
       const gone = new Set(run.sys.gone ?? []);
       const hailed = new Set(run.sys.hailed ?? []);
       this.ships = this.ships.filter((s) => !s.key || !gone.has(s.key));
@@ -303,14 +368,20 @@ export class World {
   syncSys() {
     const s = this.run.sys;
     s.t = this.arrivalT;
+    s.tt = this.thread.tideT;
+    s.px = this.player.x;
+    s.py = this.player.y;
     s.saint = this.saintUsed;
     s.shunt = this.shuntUsed;
     s.frozen = this.frozenUsed;
     s.kills = this.killsHere;
     s.used = this.pois.filter((p) => p.used).map((p) => p.id);
-    s.waves = this.wardenWaves;
-    s.next = this.wardenNext;
-    const alive = new Set(this.ships.filter((x) => x.key && !x.dead).map((x) => x.key));
+    s.waves = this.thread.handsWaves;
+    s.next = this.thread.handsNext;
+    s.rock = this.thread.rockThread;
+    s.woven = this.pois.filter((p) => p.woven).map((p) => p.id);
+    // bound ships do not survive a reload: count them gone
+    const alive = new Set(this.ships.filter((x) => x.key && !x.dead && !x.tethered).map((x) => x.key));
     s.gone = [...new Set([...(s.gone ?? []), ...this.spawnedKeys.filter((k) => !alive.has(k))])];
     s.hailed = [...new Set(this.ships.filter((x) => x.key && x.hailed).map((x) => x.key).concat(s.hailed ?? []))];
   }
@@ -318,7 +389,7 @@ export class World {
   /** re-evaluate hostility of faction ships after reputation or relic changes */
   syncHostility() {
     for (const s of this.ships) {
-      if (s.dead || s.allied || !s.faction || s.provoked || s.group) continue;
+      if (s.dead || s.allied || !s.faction || s.provoked || s.group || (s.aggro && s.hostile)) continue;
       const h = this.hostileByRep(s.faction) && s.role !== 'trader';
       if (h !== s.hostile) {
         s.hostile = h;
@@ -331,10 +402,112 @@ export class World {
   }
 
   hostileByRep(f: Faction): boolean {
-    const rep = this.run.rep[f.id] ?? 0;
+    const rep = attitude(this.run, f);
     if (f.archetype === 'raider' && this.run.relics.includes('rust_crown')) return rep <= -70;
     if (f.archetype === 'zealot' && this.run.relics.includes('pilgrim_lamp')) return rep <= -60;
     return isHostileRep(rep);
+  }
+
+  // -------------------------------------------------------------------------
+  // Grafts
+  // -------------------------------------------------------------------------
+  /** tear a part from a reeled-in hulk; false if it has nothing worth wearing */
+  private tearGraft(s: Ship, rng: RNG): boolean {
+    const run = this.run;
+    const arch = s.faction?.archetype ?? (s.side === 'monster' ? 'monster' : null);
+    if (!arch) return false;
+    if (run.graftHold.length >= GRAFT_HOLD) {
+      this.hooks.toast('No room for another graft: fit or discard one (TAB).', '#fa8');
+      return false;
+    }
+    const owned = new Set([...installed(run), ...run.graftHold].map((g) => g.id));
+    const pool = GRAFTS.filter((g) => g.arch === arch && !owned.has(g.id));
+    if (!pool.length) return false;
+    const def = rng.pick(pool);
+    run.graftHold.push({ id: def.id, color: s.faction?.color ?? '#a05070', color2: s.faction?.color2 ?? '#e0a040', from: s.faction?.id ?? '' });
+    this.hooks.toast(`Torn free: ${def.name}. Fit it to your hull from the ship screen (TAB).`, '#fc8');
+    return true;
+  }
+
+  private spitT = 0;
+  private graftTick(dt: number) {
+    if (!hasGraftFlag(this.run, 'spit')) return;
+    this.spitT -= dt;
+    if (this.spitT > 0) return;
+    const p = this.player;
+    let best: Ship | null = null;
+    let bd = 520 * 520;
+    for (const s of this.ships) {
+      if (s.dead || s.allied || !s.hostile || !s.aggro) continue;
+      const d = dist2(s.x, s.y, p.x, p.y);
+      if (d < bd) {
+        bd = d;
+        best = s;
+      }
+    }
+    if (!best) return;
+    this.spitT = 1.1;
+    const a = Math.atan2(best.y - p.y, best.x - p.x);
+    for (let k = -1; k <= 1; k++) this.spawnProj(p, 'spit', p.x, p.y, a + k * 0.15, 520, (8 + this.run.depth * 3) * this.stats.damageMult, 1.1, '#9f6', 5, new Set(['cryo']), 0, 2);
+    audio.sfx('scatter', { vol: 0.25, pitch: 1.4 });
+  }
+
+  private graftOnKill(t: Ship) {
+    const run = this.run;
+    if (hasGraftFlag(run, 'skulls')) this.player.hull = Math.min(this.player.maxHull, this.player.hull + 4 + run.depth);
+    if (hasGraftFlag(run, 'arc')) {
+      const near = this.ships.filter((s) => !s.dead && !s.allied && s.hostile && s !== t && dist2(s.x, s.y, t.x, t.y) < 320 * 320).slice(0, 2);
+      for (const s of near) {
+        this.line(t.x, t.y, s.x, s.y, '#9df', 2.5, 0.25, true);
+        this.damage(s, 14 + run.depth * 5, { src: this.player, fromPlayer: true, aoe: true });
+      }
+    }
+  }
+
+  /** crews you cut loose in other lives sometimes come back when you're outnumbered */
+  private maybeKindred() {
+    if (this.kindredCalled || this.playerDead) return;
+    const kin = meta.kindred ?? {};
+    const total = Object.values(kin).reduce((a, b) => a + b, 0);
+    if (total <= 0) return;
+    const p = this.player;
+    const near = this.ships.filter((s) => !s.dead && s.hostile && s.aggro && dist2(s.x, s.y, p.x, p.y) < 1200 * 1200).length;
+    if (near < 4) return;
+    this.kindredCalled = true;
+    if (Math.random() > 0.45) return;
+    let r = Math.random() * total;
+    let arch = Object.keys(kin)[0];
+    for (const [a, v] of Object.entries(kin)) if ((r -= v) <= 0) {
+      arch = a;
+      break;
+    }
+    kin[arch] = Math.max(0, (kin[arch] ?? 0) - 1);
+    saveMeta();
+    const f = this.run.factions.find((x) => x.archetype === arch) ?? null;
+    for (let i = 0; i < 2; i++) {
+      const a = Math.random() * TAU;
+      const s = this.makeEnemy({ faction: f, special: f ? undefined : 'rogue', role: 'fighter', x: p.x + Math.cos(a) * 450, y: p.y + Math.sin(a) * 450 });
+      s.allied = true;
+      s.hostile = false;
+      s.aggro = false;
+      s.hailable = false;
+      s.lifetime = 60;
+      s.owner = p;
+      s.name = `Kindred ${s.name}`;
+      this.ships.push(s);
+      this.warpInFx(s.x, s.y, s.radius);
+    }
+    this.hooks.toast(f ? `${f.short} ships drop out of the lane. "Someone like you cut us loose, once. We remember."` : 'Two ships drop out of the lane and fall in beside you. They do not say why.', '#9e9');
+  }
+
+  /** a pure lane anchor (nothing to board — only to loop) */
+  addAnchor(kind: StrandKind, name: string, x: number, y: number): POI {
+    const p = this.addPoi('anchor', name, 42, 'anomaly', 0, 0, true);
+    p.x = x;
+    p.y = y;
+    p.anchor = kind;
+    p.discovered = false;
+    return p;
   }
 
   private addPoi(kind: POI['kind'], name: string, r: number, site: POI['site'], orbitR: number, phase: number, still = false): POI {
@@ -358,6 +531,15 @@ export class World {
     }
     const raider = run.factions.find((f) => f.archetype === 'raider')!;
     const owner = this.owner;
+    if (node.kind === 'narrows') {
+      // the whole exodus jams into one throat: everyone still standing is here
+      for (const f of run.factions) {
+        if (this.str(f.id) < 0.5) continue;
+        const groups = f === owner ? 3 : 1 + (this.str(f.id) >= 5 ? 1 : 0);
+        for (let g = 0; g < groups; g++) this.spawnPatrol(f, rng.chance(0.2) ? 'trader' : null, rng.int(2, 3), false);
+      }
+      return;
+    }
     if (node.kind === 'hostile') {
       const side = owner && owner.archetype !== 'mercantile' && rng.chance(0.6) ? owner : raider;
       const groups = rng.int(2, 3);
@@ -373,10 +555,23 @@ export class World {
       if (rng.chance(0.15)) this.spawnPatrol(null, null, rng.int(3, 6), true, 'monster');
     }
     if (node.kind === 'derelict' && rng.chance(0.5)) this.spawnPatrol(null, 'turret', rng.int(1, 2), true, 'rogue');
+    for (const x of node.extras ?? []) {
+      if (x === 'stronghold' && owner) for (let i = 0; i < 2; i++) this.spawnPatrol(owner, null, rng.int(2, 3) + Math.floor(depth / 3), false);
+      if (x.startsWith('guest:')) {
+        const g = factionById(run, x.slice(6));
+        if (g) this.spawnPatrol(g, rng.chance(g.archetype === 'mercantile' ? 0.5 : 0.15) ? 'trader' : null, rng.int(2, 3), false);
+      }
+      if (x === 'wrack') this.spawnPatrol(null, null, rng.int(2, 4), true, 'monster');
+    }
   }
 
   private spawnPatrol(f: Faction | null, role: Role | null, n: number, forceHostile: boolean, special?: 'warden' | 'monster' | 'rogue', tries = 0): void {
     const rng = this.rng;
+    if (f && tries === 0) {
+      // a faction's numbers follow its fortunes in the exodus
+      if (this.str(f.id) < 0.5) return;
+      n = Math.max(1, Math.round(n * (0.55 + this.str(f.id) * 0.09)));
+    }
     const a = rng.range(0, TAU);
     const r = rng.range(900, this.bounds - 800);
     const cx = Math.cos(a) * r, cy = Math.sin(a) * r;
@@ -420,7 +615,7 @@ export class World {
       thrust: 400, maxSpeed: 250, turnRate: 4, weapons: [], sprite, role, level: 0, dmgMult: 1, aim: 0.1, contactDmg: 0, contactCd: 0,
       burn: 0, burnDps: 0, slow: 0, cloak: 0, invuln: 0, reflect: 0, overdrive: 0, flash: 0, shieldFlash: 0, dead: false, lifetime: 0,
       target: null, aiT: 0, orbitDir: Math.random() < 0.5 ? 1 : -1, aggro: false, wanderX: x, wanderY: y, fleeing: false, hailed: false, hailable: false,
-      group: 0, patrolGroup: 0, owner: null, boss: null, bossT: {}, phase: 0, xp: 0, credits: 0, lootChance: 0, elite: false, lastHitByPlayer: false, provoked: false, burnFromPlayer: false, key: "", thrusting: 0,
+      group: 0, patrolGroup: 0, owner: null, boss: null, bossT: {}, phase: 0, xp: 0, credits: 0, lootChance: 0, elite: false, lastHitByPlayer: false, provoked: false, burnFromPlayer: false, key: "", thrusting: 0, stun: 0,
     };
   }
 
@@ -454,6 +649,7 @@ export class World {
       ws.speed *= st.projSpeedMult;
       ws.range *= st.rangeMult;
       ws.energy *= st.energyCostMult;
+      if (hasGraftFlag(this.run, 'pyre')) ws.tags.add('burn');
       p.weapons.push({ ws, cd: 0, shots: 0, group: (i % 2) as 0 | 1 });
     });
     const h = hullDef(this.run.hullId);
@@ -721,7 +917,8 @@ export class World {
     this.updateRocks(dt);
     this.updateHazards(dt);
     this.updateFx(dt);
-    this.updateWardens(dt);
+    this.thread.update(dt);
+    this.maybeKindred();
     this.updateJump(rawDt);
     // cleanup
     if (this.ships.some((s) => s.dead)) this.ships = this.ships.filter((s) => !s.dead);
@@ -739,11 +936,12 @@ export class World {
     const sr = this.stats.scanRange * (this.node.hazard === 'nebula' ? 0.6 : 1);
     for (const poi of this.pois) if (!poi.discovered && (dist2(poi.x, poi.y, p.x, p.y) < sr * sr || this.run.relics.includes('starlit_compass'))) {
       poi.discovered = true;
-      if (poi.kind !== 'planet') this.hooks.toast(`Sensors: ${poi.name}`, '#9cf');
+      if (poi.kind !== 'planet' && poi.kind !== 'anchor') this.hooks.toast(`Sensors: ${poi.name}`, '#9cf');
     }
     this.nearest = null;
     let bd = 1e18;
     for (const poi of this.pois) {
+      if (poi.kind === 'anchor' || poi.erased) continue;
       // real stations stay dockable; everything else (including station-shaped story sites) is one-shot
       if (poi.used && !(poi.kind === 'station' && poi.site !== 'marker')) continue;
       const d = dist2(poi.x, poi.y, p.x, p.y);
@@ -767,7 +965,7 @@ export class World {
     if (!this.bossShip || this.bossShip.dead) {
       const engaged = this.ships.some((s) => s.hostile && s.aggro && !s.dead && dist2(s.x, s.y, p.x, p.y) < 1400 * 1400);
       this.hasHostilesNear = engaged;
-      audio.setMood(engaged ? 'combat' : this.wardenWarned ? 'tense' : 'calm');
+      audio.setMood(engaged ? 'combat' : this.thread.tideWarned ? 'tense' : 'calm');
     }
   }
 
@@ -785,8 +983,10 @@ export class World {
     const ay = sa * fwd + ca * strafe;
     const len = Math.hypot(ax, ay);
     this.boosting = key('Shift') && p.energy > 2 && len > 0;
-    let thrust = p.thrust * (p.slow > 0 ? 0.6 : 1);
-    let maxSp = p.maxSpeed * (p.slow > 0 ? 0.6 : 1);
+    // towing is hard work
+    const tow = this.thread.tethers.length;
+    let thrust = p.thrust * (p.slow > 0 ? 0.6 : 1) * (1 - 0.12 * tow);
+    let maxSp = p.maxSpeed * (p.slow > 0 ? 0.6 : 1) * (1 - 0.1 * tow);
     if (this.boosting) {
       thrust *= 2.2 * st.boostMult;
       maxSp *= 1.55 + (st.boostMult - 1) * 0.5;
@@ -852,7 +1052,7 @@ export class World {
       if (this.nearest.kind === 'poi') {
         const poi = this.nearest.poi;
         if (poi.kind === 'station' && poi.site !== 'marker') {
-          if (poi.hostileStation || (poi.owner && isHostileRep(this.run.rep[poi.owner.id] ?? 0))) {
+          if (poi.hostileStation || (poi.owner && this.hostileByRep(poi.owner))) {
             this.hooks.toast('Docking clearance denied.', '#f88');
             audio.sfx('error');
           } else this.hooks.dock(poi);
@@ -865,6 +1065,7 @@ export class World {
         this.hooks.hail(this.nearest.ship);
       }
     }
+    this.graftTick(dt);
     // point defense
     if (st.pointDefense > 0) {
       this.pdTimer -= dt;
@@ -1050,8 +1251,10 @@ export class World {
   private canHit(src: Ship | null, fromPlayer: boolean, t: Ship): boolean {
     if (t.dead || t === src) return false;
     if (fromPlayer) return !t.allied;
-    // enemy projectiles hit player & allies; also other factions that are hostile to them? keep simple
-    if (t.allied) return true;
+    // enemy projectiles hit player & allies, and ships of feuding factions
+    // ships that are not at war with you do not aim at you (their feud shots pass you by)
+    if (t.allied) return !src || src.hostile || !!src.boss;
+    if (src?.faction && t.faction && atWar(src.faction, t.faction)) return true;
     return false;
   }
 
@@ -1169,6 +1372,10 @@ export class World {
   damage(t: Ship, amt: number, o: { src: Ship | null; fromPlayer: boolean; ion?: boolean; crit?: boolean; tags?: Set<string>; x?: number; y?: number; beam?: boolean; aoe?: boolean; hazard?: boolean; dot?: boolean }): number {
     if (t.dead || t.invuln > 0 || amt <= 0) return 0;
     const run = this.run;
+    if (t.isPlayer) {
+      if (o.src && !o.src.allied) this.lastHitBy = { arch: o.src.faction?.archetype ?? o.src.side, name: o.src.faction?.name ?? o.src.name };
+      else if (o.hazard && !o.src) this.lastHitBy = this.thread?.tideRisen && this.thread.tideGap(t.x, t.y) < t.radius ? { arch: "tide", name: "the Tide" } : { arch: "hazard", name: "the Shoal itself" };
+    }
     if (t.isPlayer && !o.beam && !o.aoe && this.stats.dodge > 0 && Math.random() < this.stats.dodge) {
       this.text(t.x, t.y - t.radius, 'miss', '#9cf', 13);
       return 0;
@@ -1326,7 +1533,11 @@ export class World {
     }
     if (t.allied) return;
     const byPlayer = o.fromPlayer || t.lastHitByPlayer;
-    if (!byPlayer) return;
+    if (t.boss && this.bossShip === t) this.bossShip = null;
+    if (!byPlayer) {
+      if (t.faction) shiftStrength(this.run, t.faction.id, -0.08);
+      return;
+    }
     const run = this.run;
     run.stats.kills++;
     this.killsHere++;
@@ -1335,23 +1546,27 @@ export class World {
     // rep
     if (t.faction) {
       run.rep[t.faction.id] = clamp((run.rep[t.faction.id] ?? 0) - (t.role === 'trader' ? 10 : 4), -100, 100);
+      shiftStrength(run, t.faction.id, -0.15);
+      // their enemies notice
+      for (const f of run.factions) if (atWar(f, t.faction)) run.rep[f.id] = clamp((run.rep[f.id] ?? 0) + 2, -100, 100);
       if (t.faction.archetype === 'raider') for (const f of run.factions) if (f.archetype === 'mercantile') run.rep[f.id] = clamp(run.rep[f.id] + 2, -100, 100);
     }
     // xp
     this.hooks.xp(t.xp);
     // volatile
     if (o.tags?.has('volatile')) this.shockwave(t.x, t.y, 120, 25 + run.depth * 6, true);
+    this.graftOnKill(t);
     if (run.relics.includes('hungry_coil')) this.player.energy = Math.min(this.player.maxEnergy, this.player.energy + 18);
     if (run.relics.includes('fractal_seed') && Math.random() < 0.35) {
       for (let i = 0; i < 8; i++) this.spawnProj(this.player, 'shrapnel', t.x, t.y, (i / 8) * TAU, 600, 12 + run.depth * 3, 0.5, '#cfa', 2.5, new Set(), 0, 2);
     }
     // drops
-    const credits = t.credits * (0.7 + Math.random() * 0.6);
+    const credits = t.credits * (0.7 + Math.random() * 0.6) * this.creditMult;
     const n = Math.min(8, Math.max(1, Math.round(credits / 10)));
     for (let i = 0; i < n; i++) this.drop(t.x, t.y, 'credits', credits / n);
     if (Math.random() < 0.1) this.drop(t.x, t.y, 'repair', 12 + run.depth * 3);
     if (Math.random() < 0.08) this.drop(t.x, t.y, 'energy', 40);
-    if (Math.random() < (t.boss ? 0 : 0.03)) this.drop(t.x, t.y, 'fuel', 1);
+    if (Math.random() < (t.boss ? 0 : 0.18)) this.drop(t.x, t.y, 'thread', 1 + Math.floor(Math.random() * 3));
     if (Math.random() < t.lootChance) {
       const rng = new RNG((Math.random() * 1e9) >>> 0);
       const m = rollModule(rng, { rarity: lootRarity(run, rng, t.boss ? 3 : t.elite ? 1 : 0), unlocked: unlockedSet() });
@@ -1408,6 +1623,14 @@ export class World {
         return;
       }
     }
+    if (s.tethered) return; // towed: the rope moves it
+    if (s.stun > 0) {
+      s.stun -= dt;
+      s.vx *= Math.pow(0.4, dt);
+      s.vy *= Math.pow(0.4, dt);
+      s.angle += dt * 2;
+      return;
+    }
     if (s.boss) return this.updateBoss(s, dt);
     if (s.role === 'turret') {
       s.vx = s.vy = 0;
@@ -1438,6 +1661,27 @@ export class World {
       if (tgt) this.aimAndFire(s, tgt, dt);
       else s.angle = turnToward(s.angle, Math.atan2(s.vy, s.vx), s.turnRate * dt);
       return;
+    }
+    // feuding flotillas fight each other when they meet (unless busy with you)
+    if (s.faction && s.role !== 'trader' && !(s.hostile && s.aggro)) {
+      if (s.aiT <= 0 || (s.foe && s.foe.dead)) {
+        s.foe = null;
+        let bd = 850 * 850;
+        for (const o of this.ships) {
+          if (o.dead || o.allied || !o.faction || o.faction === s.faction || !atWar(s.faction, o.faction)) continue;
+          const d = dist2(s.x, s.y, o.x, o.y);
+          if (d < bd) {
+            bd = d;
+            s.foe = o;
+          }
+        }
+        if (s.aiT <= 0) s.aiT = 0.6 + Math.random() * 0.5;
+      }
+      if (s.foe && !s.foe.dead) {
+        s.fleeing = false;
+        this.combatMove(s, s.foe, dt);
+        return;
+      }
     }
     // detection
     const detect = 900 * (this.run.relics.includes('quiet_engine') ? 0.6 : 1) * (this.node.hazard === 'nebula' ? 0.6 : 1);
@@ -1528,7 +1772,10 @@ export class World {
           const n = this.ships.filter((x) => x.owner === s && !x.dead).length;
           if (n < 4) {
             const dr = this.makeEnemy({ faction: s.faction, special: s.side === 'monster' ? 'monster' : undefined, role: s.faction?.archetype === 'hive' ? 'swarm' : 'drone', x: s.x, y: s.y });
-            dr.hostile = dr.aggro = true;
+            dr.hostile = s.hostile;
+            dr.aggro = s.aggro;
+            dr.foe = s.foe;
+            dr.provoked = s.provoked;
             dr.owner = s;
             dr.group = s.group;
             dr.xp *= 0.3;
@@ -1866,7 +2113,7 @@ export class World {
 
   private collideShips(dt: number) {
     const ships = this.ships;
-    const ram = hasSkillFlag(this.run, 'ram');
+    const ram = hasSkillFlag(this.run, 'ram') || hasGraftFlag(this.run, 'ram');
     const thorn = this.run.relics.includes('thorn_lattice');
     for (let i = 0; i < ships.length; i++) {
       const a = ships[i];
@@ -1902,6 +2149,16 @@ export class World {
           if (!x.allied || y.allied) continue;
           // x is player-side, y is enemy
           const speed = Math.abs(rv);
+          // a towed hulk swung into a hostile is a flail (bystanders are only nudged)
+          if (x.tethered) {
+            if (y.hostile && speed > 110 && y.contactCd <= 0.3) {
+              y.contactCd = 0.5;
+              this.damage(y, (speed * 0.14 + 8) * (x.radius / 20) * (1 + this.run.depth * 0.15), { src: this.player, fromPlayer: true, aoe: true });
+              this.damage(x, speed * 0.04, { src: y, fromPlayer: false, aoe: true });
+              this.shake = Math.max(this.shake, 4);
+            }
+            continue;
+          }
           if (y.contactDmg > 0 && y.contactCd <= 0 && y.hostile) {
             y.contactCd = 0.6;
             this.damage(x, y.contactDmg * (ram ? 0.4 : 1) * (thorn ? 0.6 : 1), { src: y, fromPlayer: false, aoe: true });
@@ -1958,7 +2215,7 @@ export class World {
         let bd = 700 * 700;
         for (const s of this.ships) {
           if (!this.canHit(p.owner, p.fromPlayer, s)) continue;
-          if (!p.fromPlayer && !s.allied) continue;
+          if (!p.fromPlayer && (s.allied ? p.owner && !p.owner.hostile && !p.owner.boss : p.owner?.foe !== s)) continue;
           if (p.fromPlayer && !s.hostile) continue;
           const d = dist2(s.x, s.y, p.x, p.y);
           if (d < bd) {
@@ -2158,7 +2415,7 @@ export class World {
     const p = this.player;
     switch (k.kind) {
       case 'credits': {
-        const v = Math.max(1, Math.round(k.value * (run.relics.includes('ledger') ? 1.15 : 1)));
+        const v = Math.max(1, Math.round(k.value * (run.relics.includes('ledger') ? 1.15 : 1) * (hasGraftFlag(run, 'cargo') ? 1.25 : 1)));
         run.credits += v;
         run.stats.creditsEarned += v;
         this.text(p.x, p.y - 30, `+${v}¢`, '#ffd76a', 12);
@@ -2175,10 +2432,9 @@ export class World {
         p.shield = Math.min(p.maxShield, p.shield + p.maxShield * 0.3);
         audio.sfx('pickup', { vol: 0.5 });
         break;
-      case 'fuel':
-        if (run.fuel >= this.stats.maxFuel) return;
-        run.fuel = Math.min(this.stats.maxFuel, run.fuel + k.value);
-        this.text(p.x, p.y - 30, `+${k.value} fuel`, '#8ef', 13);
+      case 'thread':
+        if (run.thread >= this.stats.maxThread) return;
+        this.thread.gainThread(k.value, p.x, p.y - 30);
         audio.sfx('pickup');
         break;
       case 'module':
@@ -2219,27 +2475,6 @@ export class World {
     this.strikes = this.strikes.filter((s) => s.t > -100);
   }
 
-  private updateWardens(dt: number) {
-    if (this.node.kind === 'final' || this.playerDead) return;
-    const remaining = this.wardenTime - this.arrivalT;
-    if (!this.wardenWarned && remaining < 30) {
-      this.wardenWarned = true;
-      this.hooks.toast('The lane grows restless. Something is coming.', '#e0d8ff');
-      audio.sfx('warning');
-    }
-    if (remaining <= 0) {
-      this.wardenNext -= dt;
-      if (this.wardenNext <= 0) {
-        this.wardenWaves++;
-        this.wardenNext = 40;
-        const alive = this.ships.filter((s) => s.side === 'warden' && !s.dead).length;
-        const n = Math.min(9, 2 + Math.floor(this.run.depth / 2) + this.wardenWaves, 14 - alive);
-        if (n > 0) this.startCombat({ side: 'warden', count: n, strength: 1 + this.wardenWaves * 0.15 });
-        if (this.wardenWaves === 1) this.hooks.toast('Wardens.', '#ffffff');
-      }
-    }
-  }
-
   private updateJump(dt: number) {
     if (!this.jump || this.playerDead) return;
     const hostileNear = this.ships.some((s) => s.hostile && s.aggro && !s.dead && dist2(s.x, s.y, this.player.x, this.player.y) < 1000 * 1000);
@@ -2251,16 +2486,17 @@ export class World {
       this.part(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, -Math.cos(a) * r * 2, -Math.sin(a) * r * 2, 0.4, 2, '#cdf', true, 0.95);
     }
     if (this.jump.t >= this.jump.total) {
-      const target = this.jump.target;
+      const j = this.jump;
       this.jump = null;
       audio.sfx('jump');
-      this.hooks.jumped(target);
+      this.thread.dropAll();
+      this.hooks.jumped(j);
     }
   }
 
-  startJump(target: number) {
+  startJump(j: { node: GNode; strandIds: number[]; cost: number; dry: boolean }) {
     const total = hasSkillFlag(this.run, 'drift') ? 1.8 : 3;
-    this.jump = { target, t: 0, total };
+    this.jump = { ...j, t: 0, total };
     audio.sfx('jump_charge');
   }
 

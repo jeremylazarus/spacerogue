@@ -129,7 +129,7 @@ export const RELIC_IDS = [
   'ledger', // "Ledger of Debts" — more money from everything
   'thorn_lattice', // "Thorn Lattice" — ramming hurts them more than you
   'frozen_second', // "Frozen Second" — near death, time thickens
-  'old_map', // "Old Map" — bigger fuel reserves
+  'old_map', // "Old Map" — bigger thread reserves
   'blood_battery', // "Blood Battery" — pain powers the reactor
   'pilgrim_lamp', // "Pilgrim's Lamp" — the faithful treat you kindly
   'fractal_seed', // "Fractal Seed" — kills sometimes shatter into shrapnel

@@ -86,6 +86,12 @@ export interface Ship {
   burnFromPlayer: boolean;
   thrusting: number; // for engine fx 0..1
   tint?: string;
+  /** stunned by a closing loop: drifts, cannot act */
+  stun: number;
+  /** bound and towed on a tether */
+  tethered?: boolean;
+  /** a ship of a feuding faction this one is fighting */
+  foe?: Ship | null;
 }
 
 export type ProjKind = 'bullet' | 'missile' | 'mine' | 'flak' | 'wave' | 'lance' | 'shrapnel' | 'harpoon' | 'comet' | 'spit';
@@ -118,7 +124,7 @@ export interface Proj {
 }
 
 export interface Pickup {
-  kind: 'credits' | 'module' | 'repair' | 'energy' | 'fuel';
+  kind: 'credits' | 'module' | 'repair' | 'energy' | 'thread';
   x: number;
   y: number;
   vx: number;
@@ -129,7 +135,7 @@ export interface Pickup {
   dead: boolean;
 }
 
-export type PoiKind = 'planet' | 'station' | 'derelict' | 'anomaly' | 'beacon' | 'distress' | 'asteroid' | 'finale';
+export type PoiKind = 'planet' | 'station' | 'derelict' | 'anomaly' | 'beacon' | 'distress' | 'asteroid' | 'finale' | 'anchor';
 
 export interface POI {
   id: number;
@@ -150,6 +156,16 @@ export interface POI {
   hostileStation: boolean;
   label?: string;
   spin: number;
+  /** loopable anchor: which strand it yields */
+  anchor?: import('./weave').StrandKind;
+  anchorHaven?: boolean;
+  anchorColor?: string;
+  woven?: boolean;
+  /** taken by the Tide */
+  erased?: boolean;
+  hazard?: import('./run').Hazard;
+  /** woven-in world: always has something to find */
+  rich?: boolean;
 }
 
 export interface Rock {

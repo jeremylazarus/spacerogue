@@ -5,7 +5,12 @@ import { ARCS } from '../content/arcs';
 import { EventSession, getEvent, pickEvent, registerEvents, type EventHost } from './events';
 import { World } from './world';
 import type { POI, Ship } from './entities';
-import { computeStats, createRun, currentNode, deserializeRun, factionById, gainXp, learn, nodeById, serializeRun, type RunState } from './run';
+import { computeStats, createRun, currentNode, deserializeRun, factionById, gainXp, learn, serializeRun, type GNode, type RunState } from './run';
+import { FINAL_STEP, tierOf, weaveCost, weaveNode } from './weave';
+import { advanceExodus, heartEpilogue, resolveNarrows } from './exodus';
+import { tollEvent } from './toll';
+import { scent } from './grafts';
+import { REMNANT_WON, rememberLife, remnantEvent, seedRemnant, setRemnantRun } from './remnant';
 import { clearRun, DEEDS, hasDeed, loadRunRaw, meta, perk, saveMeta, saveRunRaw } from './meta';
 import type { Stats } from './items';
 
@@ -37,7 +42,7 @@ const FALLBACK_FINALE_WIN: EventDef = {
   start: 'a',
   nodes: { a: { text: 'The guardian of the Heart comes apart in silence. Beyond it there is only light.', choices: [{ label: 'Step into the light.', run: (ctx) => { ctx.victory('You reached the Heart. The singing stops, for a while.'); } }] } },
 };
-export const ENGINE_EVENTS = [FALLBACK_FINALE, FALLBACK_FINALE_WIN];
+export const ENGINE_EVENTS = [FALLBACK_FINALE, FALLBACK_FINALE_WIN, REMNANT_WON];
 
 export function metaView(): MetaView {
   return {
@@ -102,19 +107,26 @@ export class Game {
     // don't repeat the previous main arc if possible
     const last = meta.metaFlags['engine.lastMainArc'];
     const pool = mains.length > 1 ? mains.filter((a) => a.id !== last) : mains;
-    const forced = import.meta.env.DEV ? (globalThis as { __forceArc?: string }).__forceArc : undefined;
+    let forced = import.meta.env.DEV ? (globalThis as { __forceArc?: string }).__forceArc : undefined;
+    // the first voyage after the Shoal changed follows the weaver's road
+    if (!forced && !meta.metaFlags['engine.v2main'] && ARCS.some((a) => a.id === 'last_weaver')) {
+      forced = 'last_weaver';
+      meta.metaFlags['engine.v2main'] = true;
+    }
     const main = (forced && ARCS.find((a) => a.id === forced)) || rng.weighted(pool, (a) => (a.weight ?? 1) * (a.id === 'origin' ? 2.5 : 1));
     const sides = rng.shuffle(ARCS.filter((a) => a.kind === 'side' && (!a.eligible || a.eligible(mv)))).slice(0, rng.int(1, 2));
     meta.runs++;
     meta.metaFlags['engine.lastMainArc'] = main.id;
     saveMeta();
     const run = createRun(seed, hullId, resonance, main.id, sides.map((s) => s.id));
+    seedRemnant(run);
     for (const s of run.sideArcs) {
       const def = ARCS.find((a) => a.id === s.id);
       if (def?.activateAt !== undefined) s.at = def.activateAt;
     }
     if (perk('perk.relic') === 0 && run.relics.length) run.relics = [];
     this.run = run;
+    setRemnantRun(run);
     this.peacefulStreak = 0;
     this.enterSystem(true);
   }
@@ -125,6 +137,7 @@ export class Game {
     const run = deserializeRun(raw);
     if (!run) return false;
     this.run = run;
+    setRemnantRun(run);
     this.peacefulStreak = run.peaceful;
     this.enterSystem(false);
     return true;
@@ -161,10 +174,17 @@ export class Game {
     const run = this.run!;
     const node = currentNode(run);
     node.visited = true;
+    syncContentFlags(run);
     node.known = true;
-    for (const id of node.links) nodeById(run, id).known = true;
-    if (run.relics.includes('navigators_eye')) for (const n of run.nodes) if (n.col <= run.depth + 2) n.known = true;
     this.eventQueue = [];
+    // the exodus moves on while you travel (once per step, before the system is built from it)
+    let news: string[] = [];
+    if (run.step > 0 && run.flags['exodus.at'] !== run.step) {
+      run.flags['exodus.at'] = run.step;
+      news = advanceExodus(run);
+      if (node.kind === 'narrows') news.push(...resolveNarrows(run, node.owner));
+      syncContentFlags(run);
+    }
     this.world = new World(run, {
       toast: (m, c) => this.ui.toast(m, c),
       poi: (p) => this.onPoi(p),
@@ -196,6 +216,24 @@ export class Game {
       this.beginArc(run.mainArc);
     } else if (run.depth === 0 && !run.flags['engine.mainBegun']) this.beginArc(run.mainArc);
     for (const s of run.sideArcs) if (!s.begun && run.depth >= s.at && run.depth < run.finalDepth) this.beginArc(s.id);
+    news.forEach((n, i) => setTimeout(() => this.world && !run.outcome && this.ui.toast(n, '#e8c27a'), 4500 + i * 2600));
+    if (run.flags['remnant.step'] === run.step && !run.flags['remnant.met'] && !run.sys.arrivalDone) {
+      run.flags['remnant.met'] = true;
+      const rv = remnantEvent(run, () => this.refresh());
+      if (rv) this.queueEvent(rv, null, null, null);
+      this.save();
+    }
+    if (node.kind === 'narrows' && !run.flags['toll.' + run.step]) {
+      run.sys.arrivalDone = true;
+      const toll = tollEvent(run, () => this.refresh());
+      if (toll) this.queueEvent(toll, null, null, null);
+      // the throat has its own goings-on
+      const nrng = new RNG(hashSeed(run.seed, 'narrows', run.step));
+      if (nrng.chance(0.6)) {
+        const ev = pickEvent(run, 'arrival', factionById(run, node.owner), nrng, this.host);
+        if (ev) this.queueEvent(ev, factionById(run, node.owner), null, null);
+      }
+    }
     if (run.depth > 0 && node.kind !== 'final' && !run.sys.arrivalDone) {
       run.sys.arrivalDone = true;
       const rng = new RNG(hashSeed(run.seed, 'arrival', node.id));
@@ -233,44 +271,64 @@ export class Game {
     this.save();
   }
 
-  private onJumped(id: number) {
+  private onJumped(j: { node: GNode; strandIds: number[]; cost: number; dry: boolean }) {
     const run = this.run!;
     if (this.world && this.world.killsHere === 0 && run.depth > 0) {
       this.peacefulStreak++;
       if (this.peacefulStreak >= 4) this.grantDeed('deed.pacifist');
     } else this.peacefulStreak = 0;
-    // fuel is spent on arrival, so saving mid-spool can't lose it
-    if (run.fuel > 0) {
-      run.fuel--;
-      if (run.skills['w_drift'] && Math.random() < 0.25) {
-        run.fuel++;
-        this.ui.toast('The lane gives back a little fuel.', '#8ef');
+    // thread is spent on arrival, so saving mid-spool can't lose it
+    if (!j.dry) {
+      run.thread = Math.max(0, run.thread - j.cost);
+      if (run.skills['w_drift'] && Math.random() < 0.3) {
+        run.thread = Math.max(run.thread, Math.min(this.world!.stats.maxThread, run.thread + Math.ceil(j.cost / 2)));
+        this.ui.toast('The lane gives back a little thread.', '#bff');
       }
     } else {
       const p = this.world!.player;
       const cost = Math.min(Math.round(p.maxHull * 0.2), Math.max(0, p.hull - 1));
       p.hull -= cost;
-      this.ui.toast(`Dry jump: the drive tears at the hull (−${cost})`, '#f98');
+      run.thread = 0;
+      this.ui.toast(`A threadless jump: the lane tears at the hull (−${cost})`, '#f98');
     }
+    run.strands = run.strands.filter((s) => !j.strandIds.includes(s.id));
+    // story sites you didn't reach drift on to the next system
+    for (const m of run.markers) if (!m.done && m.step <= run.step) m.step = Math.min(FINAL_STEP - 1, run.step + 1);
     run.hull = this.world!.player.hull;
-    run.depth = nodeById(run, id).col;
-    run.nodeId = id;
+    const node = { ...j.node, id: run.nodes.length };
+    run.nodes.push(node);
+    run.step = node.col;
+    run.depth = tierOf(run.step, run.finalDepth);
+    run.nodeId = node.id;
     run.stats.systems++;
     this.ui.closeAll();
     this.enterSystem(true);
   }
 
-  /** player chose a destination on the map */
-  setCourse(id: number): string | null {
+  /** what weaving these strands would cost and create */
+  forecast(strandIds: number[]) {
+    const run = this.run!;
+    const strands = run.strands.filter((s) => strandIds.includes(s.id));
+    const res = weaveNode(run, strands);
+    return { ...res, cost: weaveCost(run, strands) };
+  }
+
+  /** player chose strands on the Loom */
+  weave(strandIds: number[]): string | null {
     const run = this.run!;
     const w = this.world!;
-    const node = currentNode(run);
-    if (!node.links.includes(id)) return 'No lane connects there.';
-    if (w.jump) return 'Drive already spooling.';
+    if (currentNode(run).kind === 'final') return 'There is nowhere deeper to go.';
+    if (w.jump) return 'Already weaving.';
     if (w.playerDead) return 'Too late.';
     if (run.pending.some((p) => p.nodeId === run.nodeId && !p.cleared)) return 'Something here has locked onto your drive. Deal with it first.';
-    if (run.fuel <= 0 && w.player.hull <= w.player.maxHull * 0.2 + 1) return 'No fuel, and the hull is too weak to survive a dry jump. Find fuel or repairs.';
-    w.startJump(id);
+    const f = this.forecast(strandIds);
+    let dry = false;
+    if (run.thread < f.cost) {
+      if (strandIds.length) return `Not enough thread to weave that (${f.cost} needed).`;
+      if (w.player.hull <= w.player.maxHull * 0.2 + 1) return 'No thread, and the hull is too weak to survive a threadless jump.';
+      dry = true;
+    }
+    w.startJump({ node: f.node, strandIds, cost: f.cost, dry });
     return null;
   }
 
@@ -285,6 +343,7 @@ export class Game {
   }
 
   refresh() {
+    if (this.run) syncContentFlags(this.run);
     if (this.world) {
       this.world.refreshPlayer(false);
       this.world.spawnDrones();
@@ -325,13 +384,13 @@ export class Game {
       def = getEvent(m.eventId);
       // marker is marked done when its event closes, so a reload mid-event can't lose the arc step
     } else if (p.kind === 'finale') {
-      if (run.pending.some((x) => x.nodeId === run.nodeId) || this.world?.bossShip) {
+      if (run.pending.some((x) => x.nodeId === run.nodeId) || (this.world?.bossShip && !this.world.bossShip.dead)) {
         this.ui.toast('Not now.', '#f98');
         return;
       }
       def = getEvent(run.finaleEvent ?? '') ?? FALLBACK_FINALE;
     } else {
-      def = rng.chance(p.kind === 'planet' ? 0.75 : 1) ? pickEvent(run, p.site, p.owner ?? owner, rng, this.host) : null;
+      def = rng.chance(p.kind === 'planet' && !p.rich ? 0.75 : 1) ? pickEvent(run, p.site, p.owner ?? owner, rng, this.host) : null;
     }
     if (p.kind !== 'finale' && p.markerIdx < 0) {
       p.used = true; // the finale can always be re-entered; markers are consumed on close
@@ -480,6 +539,10 @@ export class Game {
   endRun(won: boolean, text: string, abandoned = false) {
     const run = this.run;
     if (!run || run.outcome) return;
+    if (won) {
+      const ep = heartEpilogue(run);
+      if (ep) text = text ? `${text}\n\n${ep}` : ep;
+    }
     run.outcome = { won, text };
     this.eventQueue = [];
     // a life that never left the cradle carries nothing forward (prevents start/die farming)
@@ -494,6 +557,7 @@ export class Game {
       meta.life.deaths++;
       if (!abandoned && run.depth === 0 && run.stats.systems === 0) this.grantDeed('deed.died_early');
     }
+    rememberLife(run, won, abandoned, this.world?.lastHitBy ?? null);
     meta.lastShips.unshift(run.shipName);
     meta.lastShips = meta.lastShips.slice(0, 10);
     meta.metaFlags['engine.lastDeathDepth'] = won ? -1 : run.depth;
@@ -520,4 +584,41 @@ export class Game {
   stats(): Stats {
     return this.world!.stats;
   }
+}
+
+/**
+ * Mirror engine state into run flags so narrative content (which only sees ctx.flag) can react to it:
+ * here.kind / here.step / here.narrows / here.extras, wears.<arch> / wears.total, str.<fid> (0-10), amb.<fid>.
+ */
+export function syncContentFlags(run: RunState) {
+  const node = currentNode(run);
+  const f = run.flags;
+  f['here.kind'] = node.kind;
+  f['here.step'] = run.step;
+  f['here.narrows'] = node.kind === 'narrows';
+  f['here.extras'] = (node.extras ?? []).join(',');
+  for (const k of Object.keys(f)) if (k.startsWith('wears.')) delete f[k];
+  const sc = scent(run);
+  let tot = 0;
+  for (const [a, n] of Object.entries(sc)) {
+    f['wears.' + a] = n ?? 0;
+    tot += n ?? 0;
+  }
+  f['wears.total'] = tot;
+  for (const fa of run.factions) f['str.' + fa.id] = Math.round(run.strength?.[fa.id] ?? 5);
+  for (const a of run.ambitions ?? []) f['amb.' + a.fid] = a.kind;
+  // first experiences open codex pages
+  const firsts: [boolean, string][] = [
+    [(run.stats.bound ?? 0) > 0, 'lore.thread'],
+    [(run.stats.unravelled ?? 0) > 0, 'lore.unravel'],
+    [node.kind === 'narrows', 'lore.narrows'],
+    [tot > 0, 'lore.grafts'],
+    [run.step > 0, 'lore.loom'],
+  ];
+  let changed = false;
+  for (const [cond, id] of firsts) if (cond && !meta.codex.includes(id)) {
+    meta.codex.push(id);
+    changed = true;
+  }
+  if (changed) saveMeta();
 }

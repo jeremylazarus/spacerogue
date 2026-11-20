@@ -206,7 +206,7 @@ const site: EventDef = {
       enter: (c) => c.journal('mirror_debt', 'The double abandoned their own crew. Catch them at the Heart.'),
     },
     lie: {
-      text: `"I came back," you say. She cries, briefly, angrily, and then she's all business, checking your cargo manifest and swearing about your fuel discipline.\n\nIt's nice to be known. Even if it's someone else she knows.`,
+      text: `"I came back," you say. She cries, briefly, angrily, and then she's all business, checking your cargo manifest and swearing about your thread discipline.\n\nIt's nice to be known. Even if it's someone else she knows.`,
       enter: (c) => c.journal('mirror_debt', 'Ruthe thinks you are her captain. Your double is heading for the Heart. Catch them.'),
     },
   },

@@ -179,7 +179,7 @@ export const DERELICT_EVENTS: EventDef[] = [
             run: (ctx) => {
               ctx.gainFuel(3);
               ctx.gainXp(20);
-              ctx.note('MERIDIAN takes it well. It insists you take its fuel reserves "since I won\'t be going anywhere." Then it asks you to wave as you leave. You do.');
+              ctx.note('MERIDIAN takes it well. It insists you take its spare thread "since I won\'t be going anywhere." Then it asks you to wave as you leave. You do.');
             },
           },
         ],
@@ -426,7 +426,7 @@ export const DERELICT_EVENTS: EventDef[] = [
             label: 'Welcome aboard.',
             run: (ctx) => {
               if (!ctx.addOfficer()) {
-                ctx.note('No bunk free. She gives you her ship\'s remaining fuel instead.');
+                ctx.note('No bunk free. She gives you her ship\'s last spools of thread instead.');
                 ctx.gainFuel(3);
               }
             },
@@ -456,10 +456,10 @@ export const DERELICT_EVENTS: EventDef[] = [
     nodes: {
       start: {
         text:
-          'The derelict\'s reactor is running at 140% and climbing. In about ten minutes it will turn this hulk into a brief second sun.\n\nThe fuel stores are full. Absolutely brimming.',
+          'The derelict\'s reactor is running at 140% and climbing. In about ten minutes it will turn this hulk into a brief second sun.\n\nIts thread stores are full. Spools to the ceiling.',
         choices: [
           {
-            label: 'Siphon fuel as fast as possible, then run.',
+            label: 'Haul out spools as fast as possible, then run.',
             run: (ctx) => {
               ctx.gainFuel(2);
               if (ctx.chance(0.4)) ctx.damageHull(10);
@@ -472,7 +472,7 @@ export const DERELICT_EVENTS: EventDef[] = [
                 ctx.gainFuel(5);
                 ctx.giveItem({ slot: 'utility' });
                 ctx.gainXp(35);
-                ctx.note('The needle drops. You now own a perfectly good reactor and most of the fuel in it.');
+                ctx.note('The needle drops. You now own a perfectly good reactor and most of the thread stacked around it.');
               } else {
                 ctx.damageHull(25);
                 ctx.gainFuel(1);

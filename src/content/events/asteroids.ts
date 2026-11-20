@@ -45,7 +45,7 @@ export const ASTEROID_EVENTS: EventDef[] = [
             run: (ctx) => {
               ctx.unlockCodex('lore.tide');
               ctx.gainXp(20);
-              ctx.note('"Thought so. My door used to open onto a busier lane." They give you a jar of homemade fuel. It is suspiciously effective.');
+              ctx.note('"Thought so. My door used to open onto a busier lane." They give you a spool of homespun thread. It is suspiciously strong.');
               ctx.gainFuel(2);
             },
           },
@@ -97,9 +97,9 @@ export const ASTEROID_EVENTS: EventDef[] = [
         ],
       },
       mineral: {
-        text: 'The blue material is crystallized hyperspace. Lane-stuff, frozen solid. It hums faintly at the same pitch as the static between systems. It would make a superb fuel additive, or a very valuable curiosity.',
+        text: 'The blue material is crystallized hyperspace. Lane-stuff, frozen solid. It hums faintly at the same pitch as the static between systems. It would spin into superb thread, or a very valuable curiosity.',
         choices: [
-          { label: 'Refine it into fuel.', run: (ctx) => ctx.gainFuel(5) },
+          { label: 'Spin it into thread.', run: (ctx) => ctx.gainFuel(5) },
           { label: 'Sell it as a curiosity.', run: (ctx) => ctx.gainCredits(cr(ctx, 130)) },
           {
             label: 'Have {off:engineer} build something with it.',
@@ -135,7 +135,7 @@ export const ASTEROID_EVENTS: EventDef[] = [
               ctx.repairHull(ctx.maxHull);
               ctx.gainFuel(3);
               ctx.giveItem({ minRarity: 2 });
-              ctx.note('It nuzzles your hull, leaves a gift of shed scales that harden into perfect armor plate, and breathes warm reactor-fuel into your tanks. Then it is gone, into the deep.');
+              ctx.note('It nuzzles your hull, leaves a gift of shed scales that harden into perfect armor plate, and winds warm, glistening thread onto your spools. Then it is gone, into the deep.');
             },
           },
           {

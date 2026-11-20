@@ -387,7 +387,7 @@ const epilogue: EventDef = {
             else if (s === 'peace')
               e = `The fleets stand down. ${fa(c).leader} and ${fb(c).leader} agree to share the Keel, which means arguing about it forever, which is better than the alternative.\n\n${prof(c).name} finds its credit no good anywhere in the Shoal. You find yours good everywhere.`;
             else if (is(c, 'arc.sc.double'))
-              e = `You leave both fleets to their war and the Keel to whoever survives it. You are richer than you have ever been and nobody in the Shoal will sell you fuel.\n\nYou find, to your surprise, that you can live with that.`;
+              e = `You leave both fleets to their war and the Keel to whoever survives it. You are richer than you have ever been and nobody in the Shoal will sell you thread.\n\nYou find, to your surprise, that you can live with that.`;
             else
               e = `Neither side won. Neither side lost. The Keel drifts, carved with your old name, while two exhausted fleets limp home.\n\nPeace, of a kind, by exhaustion. It holds longer than anyone expects.`;
             c.victory(e);

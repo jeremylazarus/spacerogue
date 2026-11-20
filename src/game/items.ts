@@ -30,7 +30,7 @@ export interface Stats {
   shieldDmgMult: number;
   drones: number; // count of combat drones
   pointDefense: number; // shots per second at missiles
-  maxFuel: number;
+  maxThread: number;
   energyCostMult: number;
   luck: number;
   priceMult: number;
@@ -42,7 +42,7 @@ export function baseStats(): Stats {
     maxHull: 100, armor: 0, maxShield: 40, shieldRegen: 8, shieldDelay: 2.5, maxEnergy: 100, energyRegen: 28,
     thrust: 520, maxSpeed: 330, damageMult: 1, fireRateMult: 1, projSpeedMult: 1, rangeMult: 1, critChance: 0.05,
     critMult: 2, pickupRange: 140, scanRange: 900, hullRegen: 0, boostMult: 1, abilityCdMult: 1, dodge: 0,
-    lifesteal: 0, shieldDmgMult: 1, drones: 0, pointDefense: 0, maxFuel: 8, energyCostMult: 1, luck: 0, priceMult: 1, xpMult: 1,
+    lifesteal: 0, shieldDmgMult: 1, drones: 0, pointDefense: 0, maxThread: 40, energyCostMult: 1, luck: 0, priceMult: 1, xpMult: 1,
   };
 }
 
@@ -111,7 +111,7 @@ export const UTILS: UtilDef[] = [
   { id: 'phase', name: 'Phase Veil', desc: 'Some shots pass harmlessly through.', mod: { dodge: 0.08 }, locked: true },
   { id: 'leech', name: 'Leech Coil', desc: 'Damage dealt repairs the hull.', mod: { lifesteal: 0.03 }, locked: true },
   { id: 'ion', name: 'Ion Inverter', desc: 'Shreds enemy shields.', mod: { shieldDmgMult: 0.4 }, locked: true },
-  { id: 'fueltank', name: 'Auxiliary Tank', desc: 'Carry more fuel.', mod: { maxFuel: 3 } },
+  { id: 'fueltank', name: 'Spindle Rack', desc: 'Hold more thread.', mod: { maxThread: 12 } },
 ];
 
 // ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ const MOD_LABEL: Record<string, [string, boolean]> = {
   maxEnergy: ['energy', false], energyRegen: ['energy regen', false], thrust: ['thrust', false], maxSpeed: ['speed', false], damageMult: ['damage', true],
   fireRateMult: ['fire rate', true], critChance: ['crit chance', true], critMult: ['crit damage', true], pickupRange: ['pickup range', false], scanRange: ['scan range', false],
   hullRegen: ['hull/s', false], drones: ['drone', false], pointDefense: ['point defense', false], dodge: ['evasion', true], lifesteal: ['lifesteal', true],
-  shieldDmgMult: ['vs shields', true], abilityCdMult: ['ability cooldown', true], energyCostMult: ['energy cost', true], luck: ['fortune', false], priceMult: ['prices', true], xpMult: ['experience', true], maxFuel: ['max fuel', false], boostMult: ['boost', true], projSpeedMult: ['shot speed', true], rangeMult: ['range', true],
+  shieldDmgMult: ['vs shields', true], abilityCdMult: ['ability cooldown', true], energyCostMult: ['energy cost', true], luck: ['fortune', false], priceMult: ['prices', true], xpMult: ['experience', true], maxThread: ['max thread', false], boostMult: ['boost', true], projSpeedMult: ['shot speed', true], rangeMult: ['range', true],
 };
 export function fmtMod(k: string, v: number): string {
   const [label, pct] = MOD_LABEL[k] ?? [k, false];
@@ -330,7 +330,7 @@ export const RELICS: Record<RelicId, { name: string; desc: string; mod?: StatMod
   mourning_bell: { name: 'Mourning Bell', desc: 'When your shields break, a shockwave rings out.' },
   hungry_coil: { name: 'Hungry Coil', desc: 'Destruction feeds your reactor.' },
   glass_heart: { name: 'Glass Heart', desc: 'Great power. A fragile frame.', mod: { damageMult: 0.4 } },
-  navigators_eye: { name: "Navigator's Eye", desc: 'You see further down the lanes.' },
+  navigators_eye: { name: "Navigator's Eye", desc: 'Weaving takes less thread.' },
   saints_tooth: { name: "Saint's Tooth", desc: 'Refuses your death, once in each system.' },
   rust_crown: { name: 'Rust Crown', desc: 'Raiders recognize one of their own.' },
   quiet_engine: { name: 'Quiet Engine', desc: 'You are harder to notice.' },
@@ -339,11 +339,11 @@ export const RELICS: Record<RelicId, { name: string; desc: string; mod?: StatMod
   ledger: { name: 'Ledger of Debts', desc: 'More money, from everything.' },
   thorn_lattice: { name: 'Thorn Lattice', desc: 'Ramming hurts them more than you.' },
   frozen_second: { name: 'Frozen Second', desc: 'Near death, time thickens.' },
-  old_map: { name: 'Old Map', desc: 'Bigger fuel reserves.', mod: { maxFuel: 4 } },
+  old_map: { name: 'Old Map', desc: 'Deeper spools of thread.', mod: { maxThread: 16 } },
   blood_battery: { name: 'Blood Battery', desc: 'Pain powers the reactor.' },
   pilgrim_lamp: { name: "Pilgrim's Lamp", desc: 'The faithful treat you kindly.' },
   fractal_seed: { name: 'Fractal Seed', desc: 'Kills sometimes shatter into shrapnel.' },
-  warden_key: { name: "Warden's Key", desc: 'The enforcers are slower to come.' },
+  warden_key: { name: "Warden's Key", desc: 'The Tide is slower to rise.' },
   hollow_idol: { name: 'Hollow Idol', desc: 'Wiser in all things. Something watches.' },
   starlit_compass: { name: 'Starlit Compass', desc: "Every system's secrets, laid bare." },
 };

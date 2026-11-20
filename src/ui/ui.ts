@@ -1,3 +1,6 @@
+import { ambitionText, broken, strengthOf } from '../game/exodus';
+import { GRAFT_ARCH_LABEL, GRAFT_HOLD, attitude, graftDef, installed, silhouette } from '../game/grafts';
+import { FINAL_STEP, LOOM_SIZE, NARROWS, STRAND_COLOR, STRAND_GLYPH, STRAND_HINT, lacemakerOffers, newStrand, type StrandSpec } from '../game/weave';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { hashSeed } from '../core/rng';
@@ -10,7 +13,7 @@ import type { POI } from '../game/entities';
 import { HULLS, RARITY_COLORS, RARITY_NAMES, RELICS, describeModule, fmtMod, hullDef, moduleName, moduleValue, rollModule, type ModuleInst } from '../game/items';
 import { SKILLS, TREES, skillById } from '../game/skills';
 import { APTITUDES } from '../game/api';
-import { ROLE_APT, aptitude, canLearn, computeStats, currentNode, factionById, makeOfficer, nodeById, repLabel, type RunState } from '../game/run';
+import { ROLE_APT, aptitude, canLearn, computeStats, currentNode, factionById, makeOfficer, repLabel, type RunState } from '../game/run';
 import { DEEDS, LEGACY, hasDeed, hullUnlocked, meta, perk, resetMeta, saveMeta, unlockedSet } from '../game/meta';
 import { playerSprite } from '../game/world';
 import { ARCS } from '../content/arcs';
@@ -325,7 +328,10 @@ export class UI implements UiBridge {
     audio.sfx('ui_open', { vol: 0.5 });
     const render = () => {
       const v = session.view();
-      p.innerHTML = `<div class="phead"><h2>${esc(v.title)}</h2><span class="hint">${esc(this.game.run ? currentNode(this.game.run).name : '')}</span></div>
+      const sf = v.portrait === 'faction' && v.faction ? v.faction : null;
+      const sil = sf && this.game.run ? silhouette(this.game.run, sf) : null;
+      const seeLine = sf && this.game.run ? `<div class="hint" style="margin-top:2px">How they see you: <span style="color:${sf.color}">${repLabel(attitude(this.game.run, sf))}</span>${sil && sil.mod ? ` (${sil.mod > 0 ? '+' : ''}${sil.mod}: ${esc(sil.why)})` : ''}</div>` : '';
+      p.innerHTML = `<div class="phead"><div><h2>${esc(v.title)}</h2>${seeLine}</div><span class="hint">${esc(this.game.run ? currentNode(this.game.run).name : '')}</span></div>
         <div class="body"><div class="pt"></div><div class="text">${esc(v.text)}</div></div>
         <div class="lines">${v.lines.map((l) => `<div class="line ${l.kind}">${esc(l.text)}</div>`).join('')}</div>
         <div class="choices">${v.choices.map((c, i) => `<button class="choice" data-i="${i}" ${c.enabled ? '' : 'disabled'}><span class="n">${i + 1}</span><span>${esc(c.label)}${c.req ? `<span class="req">[${esc(c.req)}]</span>` : ''}</span></button>`).join('')}</div>`;
@@ -371,7 +377,7 @@ export class UI implements UiBridge {
     w.player.vx = w.player.vy = 0;
     const haven = currentNode(run).kind === 'haven';
     const f = poi.owner;
-    const rep = f ? run.rep[f.id] ?? 0 : 20;
+    const rep = f ? attitude(run, f) : 20;
     const st = () => w.stats;
     const discount = () => st().priceMult * (rep >= 60 ? 0.8 : rep >= 30 ? 0.9 : 1) * (haven ? 0.85 : 1);
     // stable stock per station
@@ -386,6 +392,9 @@ export class UI implements UiBridge {
     let officer: Officer | null = run.flags[officerKey] === 'none' ? null : run.flags[officerKey] ? JSON.parse(run.flags[officerKey] as string) : stockRng.chance(0.55) ? makeOfficer(stockRng, run.factions) : null;
     run.flags[officerKey] = officer ? JSON.stringify(officer) : 'none';
     const concourseKey = key + '.concourse';
+    const laceKey = key + '.lace';
+    let lace: StrandSpec[] = run.flags[laceKey] ? JSON.parse(run.flags[laceKey] as string) : haven || stockRng.chance(0.5) ? lacemakerOffers(run, stockRng) : [];
+    run.flags[laceKey] = JSON.stringify(lace);
     const o = this.overlay();
     const p = document.createElement('div');
     p.className = 'panel station';
@@ -408,7 +417,8 @@ export class UI implements UiBridge {
                <h3>Your cargo <span class="hint" style="text-transform:none;letter-spacing:0">— click to sell</span></h3><div class="cargo">${run.cargo.map((m, i) => `<div class="card" data-sell="${i}"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${RARITY_NAMES[m.rarity]} ${m.slot}</div><div class="price">+${sellP(m)}¢</div></div>`).join('') || '<div class="hint">Empty. Unequip modules in the ship screen to sell them.</div>'}</div>`
             : tab === 'yard'
               ? `<div class="service"><div class="grow"><b>Repair hull</b><span>${missing > 0 ? `${missing} damage to patch` : 'Hull is intact.'}</span></div><button class="btn" data-a="repair" ${missing > 0 && run.credits >= Math.min(repairCost, 1) ? '' : 'disabled'}>${missing > 0 ? (run.credits >= repairCost ? `Repair all · ${repairCost}¢` : `Repair what you can afford`) : 'Repaired'}</button></div>
-                 <div class="service"><div class="grow"><b>Refuel</b><span>${run.fuel}/${s.maxFuel} cells</span></div><button class="btn" data-a="fuel" ${run.fuel < s.maxFuel && run.credits >= fuelCost ? '' : 'disabled'}>Buy 1 · ${fuelCost}¢</button><button class="btn" data-a="fuelmax" ${run.fuel < s.maxFuel && run.credits >= fuelCost * 2 ? '' : 'disabled'}>Fill up</button></div>
+                 <div class="service"><div class="grow"><b>Thread</b><span>${Math.floor(run.thread)}/${Math.round(s.maxThread)} on the spools</span></div><button class="btn" data-a="fuel" ${run.thread < s.maxThread && run.credits >= fuelCost ? '' : 'disabled'}>Buy 4 · ${fuelCost}¢</button><button class="btn" data-a="fuelmax" ${run.thread < s.maxThread && run.credits >= fuelCost * 2 ? '' : 'disabled'}>Fill up</button></div>
+                 ${lace.length ? `<h3>Lacemaker</h3><div class="hint" style="margin-bottom:6px">Strands spun from lanes they have walked. Your Loom holds ${run.strands.length}/${LOOM_SIZE}.</div>${lace.map((l, i) => `<div class="service"><div class="grow"><b style="color:${l.color ?? STRAND_COLOR[l.kind]}">${STRAND_GLYPH[l.kind]} ${esc(l.label)}</b><span>${STRAND_HINT[l.kind]}</span></div><button class="btn" data-lace="${i}" ${run.credits >= Math.round(l.price * discount()) && run.strands.length < LOOM_SIZE ? '' : 'disabled'}>Buy · ${Math.round(l.price * discount())}¢</button></div>`).join('')}` : ''}
                  <div class="service"><div class="grow"><b>Concourse</b><span>${run.flags[concourseKey] ? 'You have already walked the concourse.' : 'Stretch your legs. Listen. See who is around.'}</span></div><button class="btn" data-a="concourse" ${run.flags[concourseKey] ? 'disabled' : ''}>Visit</button></div>`
               : `<h3>For hire</h3>${officer ? `<div class="service"><div class="grow"><b>${esc(officer.name)} — ${ROLE_LABEL[officer.role]}</b><span>${esc(officer.species)}, ${esc(officer.trait)}. +2 ${APT_LABEL[ROLE_APT[officer.role]]}.</span></div><button class="btn" data-a="hire" ${run.credits >= hireCost && run.officers.length < 4 ? '' : 'disabled'}>${run.officers.length >= 4 ? 'No room' : `Hire · ${hireCost}¢`}</button></div>` : '<div class="hint">Nobody here is looking for a berth.</div>'}
                  <h3>Your officers (${run.officers.length}/4)</h3>${run.officers.map((of) => `<div class="list-item"><b>${esc(of.name)}</b><span class="hint">${ROLE_LABEL[of.role]} · ${esc(of.species)} · ${esc(of.trait)}</span></div>`).join('') || '<div class="hint">You fly alone.</div>'}`
@@ -468,6 +478,22 @@ export class UI implements UiBridge {
         render();
         return;
       }
+      const li = t.closest('[data-lace]')?.getAttribute('data-lace');
+      if (li !== null && li !== undefined) {
+        const l = lace[+li];
+        const cost = Math.round(l.price * disc);
+        if (l && run.credits >= cost && run.strands.length < LOOM_SIZE) {
+          run.credits -= cost;
+          const { price: _p, ...spec } = l;
+          void _p;
+          run.strands.push(newStrand(run, spec));
+          lace = lace.filter((_, i) => i !== +li);
+          run.flags[laceKey] = JSON.stringify(lace);
+          audio.sfx('levelup', { vol: 0.35, pitch: 1.5 });
+        } else audio.sfx('error');
+        render();
+        return;
+      }
       const a = t.closest('[data-a]')?.getAttribute('data-a');
       if (a === 'undock') this.closeId('station');
       if (a === 'ship') this.showShip();
@@ -484,9 +510,9 @@ export class UI implements UiBridge {
       if (a === 'fuel' || a === 'fuelmax') {
         const fc = Math.round(16 * disc * (1 + run.depth * 0.1));
         do {
-          if (run.credits < fc || run.fuel >= s.maxFuel) break;
+          if (run.credits < fc || run.thread >= s.maxThread) break;
           run.credits -= fc;
-          run.fuel++;
+          run.thread = Math.min(s.maxThread, run.thread + 4);
         } while (a === 'fuelmax');
         audio.sfx('pickup');
         render();
@@ -536,16 +562,22 @@ export class UI implements UiBridge {
           ? `<div class="card ${selected?.from === kind && selected.i === i ? 'sel' : ''}" draggable="true" data-from="${kind}" data-i="${i}" style="--edge:${RARITY_COLORS[m.rarity]}66"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${kind === 'weapon' ? (i % 2 === 0 ? 'Left mouse' : 'Right mouse') : 'Utility'}</div></div>`
           : `<div class="card empty" data-from="${kind}" data-i="${i}">Empty ${kind} slot</div>`;
       const stat = (label: string, v: string) => `<div><span>${label}</span><span>${v}</span></div>`;
+      const silLines = run.factions.map((f) => {
+        const sl = silhouette(run, f);
+        return sl.mod ? `<div class="hint" style="font-size:13px"><span style="color:${f.color}">${esc(f.short)}</span> ${sl.mod > 0 ? '+' : ''}${sl.mod} — ${esc(sl.why)}</div>` : '';
+      }).join('');
       p.innerHTML = `<div class="phead"><div><h2>${esc(run.shipName)}</h2><span class="hint">${h.name} · Captain ${esc(run.captain)}</span></div><div class="row"><span class="hint">Drag modules between slots and cargo · double-click to equip/unequip</span><button class="x" data-a="close">×</button></div></div>
         <div class="pbody"><div class="cols"><div>
           <h3>Weapons</h3><div class="slots">${run.weapons.map((m, i) => slotCard(m, 'weapon', i)).join('')}</div>
           <h3>Utility</h3><div class="slots">${run.utils.map((m, i) => slotCard(m, 'utility', i)).join('')}</div>
+          <h3>Grafts (${installed(run).length}/${run.grafts.length})</h3><div class="slots">${run.grafts.map((g, i) => g ? `<div class="card graft" data-gs="${i}" style="--edge:${g.color}88"><div class="nm" style="color:${g.color}">${esc(graftDef(g.id).name)}</div><div class="kind">${GRAFT_ARCH_LABEL[graftDef(g.id).arch]} graft · <a data-gtear="${i}">tear out</a></div></div>` : `<div class="card empty">Empty graft socket</div>`).join('')}</div>
+          ${silLines ? `<div class="hint" style="margin-top:6px">How they read your hull:</div>${silLines}` : ''}
           <h3>Systems</h3><div class="stats">
             ${stat('Hull', `${Math.round(game.world?.player.hull ?? run.hull)}/${s.maxHull}`)}${stat('Armor', s.armor.toFixed(0))}
             ${stat('Shield', `${Math.round(s.maxShield)} (+${s.shieldRegen.toFixed(1)}/s)`)}${stat('Energy', `${Math.round(s.maxEnergy)} (+${Math.round(s.energyRegen)}/s)`)}
             ${stat('Speed', Math.round(s.maxSpeed) + '')}${stat('Damage', `${Math.round((s.damageMult - 1) * 100) >= 0 ? '+' : ''}${Math.round((s.damageMult - 1) * 100)}%`)}
-            ${stat('Fire rate', `+${Math.round((s.fireRateMult - 1) * 100)}%`)}${stat('Critical', `${Math.round(s.critChance * 100)}% ×${s.critMult.toFixed(1)}`)}
-            ${stat('Scanner', Math.round(s.scanRange) + '')}${stat('Fuel', `${run.fuel}/${s.maxFuel}`)}
+            ${stat('Fire rate', `${s.fireRateMult >= 1 ? '+' : ''}${Math.round((s.fireRateMult - 1) * 100)}%`)}${stat('Critical', `${Math.round(s.critChance * 100)}% ×${s.critMult.toFixed(1)}`)}
+            ${stat('Scanner', Math.round(s.scanRange) + '')}${stat('Thread', `${Math.floor(run.thread)}/${Math.round(s.maxThread)}`)}
             ${s.drones ? stat('Drones', s.drones + '') : ''}${s.dodge ? stat('Evasion', Math.round(s.dodge * 100) + '%') : ''}${s.hullRegen ? stat('Hull repair', s.hullRegen.toFixed(1) + '/s') : ''}${s.lifesteal ? stat('Lifesteal', Math.round(s.lifesteal * 100) + '%') : ''}
           </div>
           <h3>Relics</h3><div>${run.relics.map((r) => `<span class="tag" data-relic="${r}" style="--edge:#ffb34766;color:#ffd08a">${esc(RELICS[r].name)}</span>`).join('') || '<span class="hint">None yet.</span>'}</div>
@@ -553,6 +585,7 @@ export class UI implements UiBridge {
         </div><div>
           <h3>Cargo (${run.cargo.length}/12)</h3><div class="cargo" data-cargo="1">${run.cargo.map((m, i) => `<div class="card ${selected?.from === 'cargo' && selected.i === i ? 'sel' : ''}" draggable="true" data-from="cargo" data-i="${i}" style="--edge:${RARITY_COLORS[m.rarity]}44"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${RARITY_NAMES[m.rarity]} ${m.slot}</div></div>`).join('')}<div class="card empty" data-from="cargo" data-i="-1">Drop here to unequip</div></div>
           <div class="row" style="margin-top:12px"><button class="btn small danger" data-a="scrap" ${selected?.from === 'cargo' ? '' : 'disabled'}>Scrap selected</button><span class="hint">Scrapping a module yields a few credits.</span></div>
+          <h3>Graft hold (${run.graftHold.length}/${GRAFT_HOLD})</h3><div class="slots">${run.graftHold.map((g, i) => `<div class="card graft" data-gh="${i}" style="--edge:${g.color}66"><div class="nm" style="color:${g.color}">${esc(graftDef(g.id).name)}</div><div class="kind"><a data-gfit="${i}">fit</a> · <a data-gdrop="${i}">discard</a></div></div>`).join('') || '<span class="hint">Reel in a bound ship (hold F) to tear a part from it.</span>'}</div>
         </div></div></div>`;
       p.querySelectorAll<HTMLElement>('.card[draggable]').forEach((el) => {
         const m = this.getMod(run, el.dataset.from as 'cargo', +el.dataset.i!);
@@ -604,6 +637,34 @@ export class UI implements UiBridge {
       const t = e.target as HTMLElement;
       const a = t.closest('[data-a]')?.getAttribute('data-a');
       if (a === 'close') return this.closeId('ship');
+      const gtear = t.closest('[data-gtear]')?.getAttribute('data-gtear');
+      if (gtear !== null && gtear !== undefined) {
+        const g = run.grafts[+gtear];
+        if (g && confirm(`Tear out the ${graftDef(g.id).name}? It will not survive being removed.`)) {
+          run.grafts[+gtear] = null;
+          game.refresh();
+          audio.sfx('explode_small', { vol: 0.3 });
+        }
+        return render();
+      }
+      const gfit = t.closest('[data-gfit]')?.getAttribute('data-gfit');
+      if (gfit !== null && gfit !== undefined) {
+        const slot = run.grafts.findIndex((x) => !x);
+        if (slot < 0) {
+          this.toast('Every graft socket is full. Tear one out first.', '#fa8');
+          audio.sfx('error');
+        } else {
+          run.grafts[slot] = run.graftHold.splice(+gfit, 1)[0];
+          game.refresh();
+          audio.sfx('levelup', { vol: 0.4, pitch: 0.8 });
+        }
+        return render();
+      }
+      const gdrop = t.closest('[data-gdrop]')?.getAttribute('data-gdrop');
+      if (gdrop !== null && gdrop !== undefined) {
+        run.graftHold.splice(+gdrop, 1);
+        return render();
+      }
       if (a === 'scrap' && selected?.from === 'cargo') {
         const [m] = run.cargo.splice(selected.i, 1);
         const v = Math.round(moduleValue(m) * 0.12);
@@ -750,169 +811,75 @@ export class UI implements UiBridge {
     p.className = 'panel mapp';
     o.appendChild(p);
     const cur = currentNode(run);
-    p.innerHTML = `<div class="phead"><div><h2>Star map</h2><span class="hint">Lanes run one way: deeper. Each jump burns a fuel cell. Fuel ${run.fuel}.</span></div><button class="x" data-a="close">×</button></div>
-      <div class="pbody"><div class="mapwrap"><canvas></canvas></div><div class="mapinfo"></div></div>`;
-    const cv = p.querySelector('canvas')!;
-    const info = p.querySelector<HTMLElement>('.mapinfo')!;
-    const W = Math.min(1060, innerWidth * 0.92), H = Math.min(520, innerHeight * 0.58);
-    const dpr = Math.min(2, devicePixelRatio);
-    cv.width = W * dpr;
-    cv.height = H * dpr;
-    cv.style.height = H + 'px';
-    const c = cv.getContext('2d')!;
-    let hover: number | null = null;
-    let chosen: number | null = null;
-    const pos = (n: { x: number; y: number }) => [n.x * W, n.y * H] as const;
-    const ICON: Record<string, string> = { station: '⌂', hostile: '⚔', nebula: '☁', derelict: '⚓', anomaly: '✶', haven: '✚', empty: '·', start: '◎', final: '◉' };
-    const draw = (t: number) => {
-      c.setTransform(dpr, 0, 0, dpr, 0, 0);
-      c.clearRect(0, 0, W, H);
-      // lanes
-      for (const n of run.nodes) for (const l of n.links) {
-        const m = nodeById(run, l);
-        const [x1, y1] = pos(n), [x2, y2] = pos(m);
-        const active = n.id === cur.id;
-        const past = n.visited && m.visited;
-        c.strokeStyle = past ? 'rgba(79,224,200,0.55)' : active ? (l === hover || l === chosen ? 'rgba(255,217,152,0.95)' : 'rgba(255,190,92,0.6)') : n.col < cur.col ? 'rgba(110,90,60,0.15)' : 'rgba(168,116,47,0.3)';
-        c.lineWidth = active ? 2.5 : 1.5;
-        c.setLineDash(active && !(l === hover || l === chosen) ? [6, 6] : []);
-        c.lineDashOffset = -t * 20;
-        c.beginPath();
-        c.moveTo(x1, y1);
-        c.lineTo(x2, y2);
-        c.stroke();
-      }
-      c.setLineDash([]);
-      for (const n of run.nodes) {
-        const [x, y] = pos(n);
-        const owner = factionById(run, n.owner);
-        const reachable = cur.links.includes(n.id);
-        const faded = n.col < cur.col && !n.visited;
-        c.globalAlpha = faded ? 0.25 : 1;
-        if (owner && n.known) {
-          c.fillStyle = owner.color + '22';
-          c.beginPath();
-          c.arc(x, y, 26, 0, Math.PI * 2);
-          c.fill();
-        }
-        c.fillStyle = n.id === cur.id ? '#ffd998' : n.visited ? '#2a8c80' : reachable ? '#ffbe5c' : '#4c3e2b';
-        c.beginPath();
-        c.arc(x, y, n.kind === 'final' ? 13 : n.id === hover ? 10 : 8, 0, Math.PI * 2);
-        c.fill();
-        if (n.id === cur.id) {
-          c.strokeStyle = '#4fe0c8';
-          c.lineWidth = 2;
-          c.beginPath();
-          c.arc(x, y, 14 + Math.sin(t * 3) * 2, 0, Math.PI * 2);
-          c.stroke();
-        }
-        if (n.id === chosen) {
-          c.strokeStyle = '#ffd36b';
-          c.lineWidth = 2;
-          c.beginPath();
-          c.arc(x, y, 15, 0, Math.PI * 2);
-          c.stroke();
-        }
-        c.font = '600 13px "Chakra Petch", system-ui';
-        c.textAlign = 'center';
-        c.fillStyle = '#0a0e1a';
-        if (n.known) {
-          c.fillText(ICON[n.kind] ?? '·', x, y + 4.5);
-          if (n.hazard !== 'none' && n.kind !== 'nebula') {
-            c.fillStyle = '#fa6';
-            c.font = '10px system-ui';
-            c.fillText('⚠', x + 12, y - 8);
-          }
-        } else {
-          c.fillText('?', x, y + 4.5);
-        }
-        const marked = run.markers.some((m) => m.nodeId === n.id && !m.done);
-        if (marked) {
-          c.fillStyle = '#ffd36b';
-          c.font = '14px system-ui';
-          c.fillText('◆', x, y - 16);
-        }
-        c.globalAlpha = 1;
-      }
+    const chosen = new Set<number>();
+    const render = () => {
+      const f = game.forecast([...chosen]);
+      const strands = run.strands;
+      const left = FINAL_STEP - run.step;
+      const narrowsAhead = NARROWS.filter((n) => n > run.step);
+      const cards = strands.length
+        ? strands.map((s, i) => `<div class="strand ${chosen.has(s.id) ? 'on' : ''}" data-s="${s.id}" style="--sc:${s.color}">
+            <span class="sg">${STRAND_GLYPH[s.kind]}</span><span class="grow"><b>${esc(s.label)}</b><span class="hint">${STRAND_HINT[s.kind]}</span></span>
+            <span class="key">${i + 1}</span><button class="x" data-drop="${s.id}" title="Let this strand go">×</button></div>`).join('')
+        : `<div class="hint" style="padding:10px 4px">Your Loom is empty. Hold <b>Q</b> to spin thread, and fly a loop around a lane-beacon, a world, a station, a wreck or a scar to take its strand.</div>`;
+      const bands = run.nodes.map((n) => {
+        const fo = factionById(run, n.owner);
+        return `<div class="band" title="${esc(n.name)}" style="background:${fo ? fo.color : '#4c3e2b'}${n.id === cur.id ? ';outline:2px solid #4fe0c8' : ''}"></div>`;
+      }).join('') + Array.from({ length: left }, (_, i) => `<div class="band future${NARROWS.includes(run.step + 1 + i) ? ' narrows' : ''}${run.step + 1 + i === FINAL_STEP ? ' heart' : ''}"></div>`).join('');
+      const final = cur.kind === 'final';
+      const can = !final && (run.thread >= f.cost || chosen.size === 0);
+      const label = final ? 'There is nowhere deeper' : chosen.size === 0 ? (run.thread >= f.cost ? `Frayed jump · ${f.cost} thread` : 'Threadless jump (tears the hull)') : `Weave & jump · ${f.cost} thread`;
+      p.innerHTML = `<div class="phead"><div><h2>The Loom</h2><span class="hint">Choose up to ${LOOM_SIZE} strands; they decide the system you weave into. Thread ${Math.floor(run.thread)}/${Math.round(game.stats().maxThread)}.</span></div><button class="x" data-a="close">×</button></div>
+        <div class="pbody">
+          <div class="tapestry">${bands}</div>
+          <div class="hint" style="margin:4px 0 12px">Lane ${run.step} of ${FINAL_STEP} · ${final ? 'you are at the Heart' : `the Heart lies ${left} lane${left === 1 ? '' : 's'} deeper`}${narrowsAhead.length ? ` · the Narrows in ${narrowsAhead[0] - run.step}` : ''}</div>
+          <div class="row" style="align-items:flex-start;gap:18px">
+            <div class="grow" style="flex:1">${cards}</div>
+            <div class="forecast" style="flex:1"><div class="hint" style="letter-spacing:.08em">FORECAST</div>
+              ${final ? '' : `<b style="font-size:16px">${esc(f.node.name)}</b>${f.lines.map((l) => `<div>${esc(l)}</div>`).join('')}`}
+              <div style="margin-top:14px"><button class="btn primary" data-a="jump" ${can ? '' : 'disabled'}>${label}</button></div>
+            </div>
+          </div>
+        </div>`;
     };
-    let raf = 0;
-    const loop = (ts: number) => {
-      draw(ts / 1000);
-      raf = requestAnimationFrame(loop);
+    const toggle = (id: number) => {
+      if (chosen.has(id)) chosen.delete(id);
+      else if (chosen.size < LOOM_SIZE) chosen.add(id);
+      audio.sfx('ui_click', { vol: 0.3 });
+      render();
     };
-    raf = requestAnimationFrame(loop);
-    const nodeAt = (ex: number, ey: number) => {
-      const r = cv.getBoundingClientRect();
-      const mx = ((ex - r.left) / r.width) * W, my = ((ey - r.top) / r.height) * H;
-      let best: number | null = null, bd = 22 * 22;
-      for (const n of run.nodes) {
-        const [x, y] = pos(n);
-        const d = (x - mx) ** 2 + (y - my) ** 2;
-        if (d < bd) {
-          bd = d;
-          best = n.id;
-        }
-      }
-      return best;
-    };
-    const KIND_DESC: Record<string, string> = { station: 'A station: trade, repairs, fuel, crew.', hostile: 'Hostile activity reported.', nebula: 'A nebula. Sensors are blinded here.', derelict: 'Wreckage drifts here.', anomaly: 'Strange readings.', haven: 'A quiet haven. Cheap repairs.', empty: 'Little of note on the charts.', start: 'The cradle.', final: 'The Heart of the Shoal.' };
-    const HAZ: Record<string, string> = { asteroids: 'Asteroid fields', radiation: 'Radiation (weak shields)', ionstorm: 'Ion storms', nebula: '' };
-    const showInfo = (id: number | null) => {
-      const target = id ?? chosen;
-      if (target === null) {
-        info.innerHTML = `<span class="hint">Hover a system to inspect it. Click a connected system to set course.</span>`;
-        return;
-      }
-      const n = nodeById(run, target);
-      const owner = factionById(run, n.owner);
-      const reachable = cur.links.includes(n.id);
-      const markers = run.markers.filter((m) => m.nodeId === n.id && !m.done);
-      info.innerHTML = `<div class="row"><div class="grow"><b style="font-size:15px">${esc(n.name)}</b> <span class="hint">${owner && n.known ? `· <span style="color:${owner.color}">${esc(owner.name)}</span> (${repLabel(run.rep[owner.id] ?? 0)})` : ''}</span>
-        <div class="hint">${n.known ? KIND_DESC[n.kind] : 'Uncharted.'} ${n.known && n.hazard !== 'none' && HAZ[n.hazard] ? '⚠ ' + HAZ[n.hazard] : ''}</div>
-        ${markers.map((m) => `<div style="color:var(--gold);font-size:13px">◆ ${esc(m.label)}</div>`).join('')}</div>
-        ${n.id === chosen && reachable ? `<button class="btn primary" data-a="jump">${run.fuel > 0 ? 'Engage jump drive' : 'Dry jump (damages hull)'}</button>` : reachable ? '<span class="hint">Click to select</span>' : ''}</div>`;
-    };
-    showInfo(null);
-    cv.addEventListener('mousemove', (e) => {
-      const n = nodeAt(e.clientX, e.clientY);
-      if (n !== hover) {
-        hover = n;
-        showInfo(hover);
-      }
-    });
-    cv.addEventListener('mouseleave', () => {
-      hover = null;
-      showInfo(null);
-    });
-    cv.addEventListener('click', (e) => {
-      const n = nodeAt(e.clientX, e.clientY);
-      if (n !== null && cur.links.includes(n)) {
-        chosen = n;
-        showInfo(n);
-      }
-    });
-    cv.addEventListener('dblclick', (e) => {
-      const n = nodeAt(e.clientX, e.clientY);
-      if (n !== null && cur.links.includes(n)) {
-        chosen = n;
-        doJump();
-      }
-    });
+    render();
     const doJump = () => {
-      if (chosen === null) return;
-      const err = game.setCourse(chosen);
+      const err = game.weave([...chosen]);
       if (err) {
         this.toast(err, '#fa8');
         audio.sfx('error');
       } else this.closeId('map');
     };
     p.addEventListener('click', (e) => {
-      const a = (e.target as HTMLElement).closest('[data-a]')?.getAttribute('data-a');
+      const el = e.target as HTMLElement;
+      const drop = el.closest('[data-drop]')?.getAttribute('data-drop');
+      if (drop) {
+        const id = +drop;
+        run.strands = run.strands.filter((s) => s.id !== id);
+        chosen.delete(id);
+        render();
+        return;
+      }
+      const s = el.closest('[data-s]')?.getAttribute('data-s');
+      if (s) return toggle(+s);
+      const a = el.closest('[data-a]')?.getAttribute('data-a');
       if (a === 'close') this.closeId('map');
       if (a === 'jump') doJump();
     });
-    if (cur.kind === 'final') info.innerHTML = '<span class="hint">There is nowhere deeper to go.</span>';
-    this.push('map', o, () => cancelAnimationFrame(raf));
+    const onKey = (e: KeyboardEvent) => {
+      if (this.top()?.id !== 'map') return;
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= run.strands.length) toggle(run.strands[n - 1].id);
+      if (e.key === 'Enter') doJump();
+    };
+    addEventListener('keydown', onKey);
+    this.push('map', o, () => removeEventListener('keydown', onKey));
   }
 
   // -------------------------------------------------------------------------
@@ -928,8 +895,17 @@ export class UI implements UiBridge {
     Promise.resolve({ ARCS }).then(({ ARCS }) => {
       p.innerHTML = `<div class="phead"><h2>Journal</h2><div class="row"><button class="btn small" data-a="codex">Codex (${meta.codex.length})</button><button class="x" data-a="close">×</button></div></div>
       <div class="pbody">${entries.map(([id, t]) => `<div class="entry"><b>${esc(ARCS.find((a) => a.id === id)?.title ?? id)}</b>${esc(t)}</div>`).join('') || '<div class="hint">Nothing written yet.</div>'}
+      <h3>The exodus</h3><div class="ledger">${run.factions.map((f) => {
+        const st = strengthOf(run, f.id);
+        const amb = run.ambitions?.find((a) => a.fid === f.id);
+        const pips = Array.from({ length: 10 }, (_, i) => `<i class="${i < Math.round(st) ? 'on' : ''}" style="--fc:${f.color}"></i>`).join('');
+        const sil = silhouette(run, f);
+        return `<div class="fac"><div class="row"><b style="color:${f.color}">${esc(f.name.replace(/^the /, 'The '))}</b><span class="grow"></span><span class="hint">${repLabel(attitude(run, f))}${sil.mod ? ` (${sil.mod > 0 ? '+' : ''}${sil.mod} hull)` : ''}</span></div>
+          <div class="pips">${broken(run, f.id) ? '<span class="hint">broken</span>' : pips}</div>
+          ${amb ? `<div class="hint">${esc(ambitionText(run, amb))}${amb.done === true ? ' <span style="color:#9e9">— done</span>' : amb.done === false ? ' <span style="color:#f98">— failed</span>' : ''}</div>` : ''}</div>`;
+      }).join('')}</div>
       <h3>This voyage</h3><div class="stats" style="max-width:420px">
-        <div><span>Depth</span><span>${run.depth} / ${run.finalDepth}</span></div><div><span>Systems crossed</span><span>${run.stats.systems}</span></div>
+        <div><span>Lanes woven</span><span>${run.step} / ${FINAL_STEP}</span></div><div><span>Systems crossed</span><span>${run.stats.systems}</span></div>
         <div><span>Ships destroyed</span><span>${run.stats.kills}</span></div><div><span>Credits earned</span><span>${run.stats.creditsEarned}</span></div>
       </div></div>`;
     });

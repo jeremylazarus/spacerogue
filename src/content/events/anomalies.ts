@@ -34,7 +34,7 @@ export const ANOMALY_EVENTS: EventDef[] = [
                 ctx.note('You exit with a lane chart that was, technically, drawn by you tomorrow.');
               } else {
                 ctx.loseFuel(2);
-                ctx.note('You get out eventually. The fuel gauge insists you spent a week trying.');
+                ctx.note('You get out eventually. Your spools insist you spent a week trying.');
               }
             },
           },
@@ -196,7 +196,7 @@ export const ANOMALY_EVENTS: EventDef[] = [
     nodes: {
       start: {
         text:
-          'A flower of ionized gas, kilometers across, unfolding in slow motion. Its petals are rich in exotic isotopes — excellent fuel, if you can scoop it before the bloom closes.\n\nIts center is the hottest thing in the system.',
+          'A flower of ionized gas, kilometers across, unfolding in slow motion. Its petals are rich in exotic isotopes — excellent for spinning thread, if you can scoop it before the bloom closes.\n\nIts center is the hottest thing in the system.',
         choices: [
           { label: 'Skim the outer petals.', run: (ctx) => ctx.gainFuel(2) },
           {
@@ -292,7 +292,7 @@ export const ANOMALY_EVENTS: EventDef[] = [
               else if (r === 3) {
                 ctx.loseFuel(1);
                 ctx.gainFuel(4);
-                ctx.note('The fuel tank briefly contained more fuel than it holds.');
+                ctx.note('Your spools briefly held more thread than they can.');
               } else {
                 const o = ctx.addOfficer();
                 if (o) ctx.note(`${o.name} is suddenly aboard. They are as surprised as you are. They were, apparently, always on the crew roster.`);
