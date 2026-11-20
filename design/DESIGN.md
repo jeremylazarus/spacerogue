@@ -5,12 +5,12 @@ See WORLD.md for setting/lore. This file documents systems so future sessions st
 ## Run structure
 - Galaxy: columns 0..7 (`run.finalDepth`). Col 0 = cradle (start), col 7 = The Heart (finale). Cols 1-6 have 3-4 nodes; lanes only go forward (`GNode.links`).
 - Node kinds: station, hostile, nebula, derelict, anomaly, haven, empty. Hazards: asteroids, radiation (shield regen ×0.5), ionstorm (telegraphed lightning strikes), nebula (scan & detection ×0.6).
-- Jumping: open map (M), select a linked node, engage → spool 3s (1.8s w/ Lane Drifter), halved speed if aggro hostiles within 1000. Costs 1 fuel; at 0 fuel a "dry jump" costs 20% max hull.
+- Jumping: open map (M), select a linked node, engage → spool 3s (1.8s w/ Lane Drifter), halved speed if aggro hostiles within 1000. Costs 1 fuel, spent on arrival; at 0 fuel a "dry jump" costs 20% max hull (refused if hull too low). Jumps blocked while an afterVictory fight is unresolved.
 - Wardens: after ~220s in a system (300 in the cradle), warning at T-30s, then escalating warden waves every 40s. Warden's Key ×1.5, Hollow Idol ×0.75, Resonance −5%/level. Never in the final system.
 - Every system arrival autosaves (localStorage `spacerogue.run.v1`). Continue regenerates the system from its seed.
 
 ## Player ship
-- Twin-stick: WASD screen-relative thrust w/ soft brake, mouse aim, LMB fires even-index weapons, RMB odd-index (a single weapon fires on either). Shift afterburner (energy), Space hull ability, E interact/hail.
+- Ship-relative thrust: W forward, S reverse, A/D strafe (owner request), soft brake; ship faces the mouse (heading held when cursor is on the ship), mouse aim, LMB fires even-index weapons, RMB odd-index (a single weapon fires on either). Shift afterburner (energy), Space hull ability, E interact/hail.
 - Hulls (items.ts HULLS): Skiff (blink), Lancer (overdrive), Bulwark (bastion: refill shield + reflect), Weaver (drones + swarm), Mirage (cloak, guaranteed crit from cloak), Dredger (harpoon), Hollow (echo ally; secret — deed.frag3).
 - Modules: weapons (pulse, scatter, rail, missile, beam, flak; locked until Legacy: mine, arc, wave, lance) and utilities (shield, armor, thruster, reactor, targeting, capacitor, loader, nanites, tractor, scanner, dronebay, pd, fueltank; locked: phase, leech, ion). Rarity 0-4 scales base stats ×1..1.6 and adds 0-3 affixes.
 - Relics: passive artifacts (items.ts RELICS, effects scattered through world.ts/run.ts).

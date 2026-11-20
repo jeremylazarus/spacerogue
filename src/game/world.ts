@@ -772,11 +772,15 @@ export class World {
   private updatePlayerControl(dt: number) {
     const p = this.player;
     const st = this.stats;
-    let ax = 0, ay = 0;
-    if (key('w') || key('ArrowUp')) ay -= 1;
-    if (key('s') || key('ArrowDown')) ay += 1;
-    if (key('a') || key('ArrowLeft')) ax -= 1;
-    if (key('d') || key('ArrowRight')) ax += 1;
+    // ship-relative: W forward, S reverse, A/D strafe left/right of the ship's facing
+    let fwd = 0, strafe = 0;
+    if (key('w') || key('ArrowUp')) fwd += 1;
+    if (key('s') || key('ArrowDown')) fwd -= 1;
+    if (key('a') || key('ArrowLeft')) strafe -= 1;
+    if (key('d') || key('ArrowRight')) strafe += 1;
+    const ca = Math.cos(p.angle), sa = Math.sin(p.angle);
+    const ax = ca * fwd - sa * strafe;
+    const ay = sa * fwd + ca * strafe;
     const len = Math.hypot(ax, ay);
     this.boosting = key('Shift') && p.energy > 2 && len > 0;
     let thrust = p.thrust * (p.slow > 0 ? 0.6 : 1);
@@ -808,7 +812,9 @@ export class World {
     }
     audio.setThrust(p.thrusting * (this.boosting ? 1 : 0.5));
     // aim
-    const aimA = Math.atan2(input.worldY - p.y, input.worldX - p.x);
+    // hold heading while the cursor sits on the ship, so movement directions do not jitter
+    const aimDist = Math.hypot(input.worldX - p.x, input.worldY - p.y);
+    const aimA = aimDist > p.radius + 24 ? Math.atan2(input.worldY - p.y, input.worldX - p.x) : p.angle;
     p.angle = turnToward(p.angle, aimA, p.turnRate * dt);
     // fire
     const fire0 = input.lmb && !input.blocked;

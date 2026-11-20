@@ -667,7 +667,7 @@ export class Renderer {
       c.font = font(13);
       c.fillStyle = `rgba(220,230,255,${clamp(40 - world.arrivalT, 0, 1) * 0.75})`;
       c.textAlign = 'right';
-      const lines = ['WASD  fly', 'Mouse  aim · click to fire', 'Shift  afterburner · Space  ship ability', 'E  interact · M  star map', 'Tab  ship · K  captain · J  journal', 'Scroll  zoom · Esc  pause'];
+      const lines = ['W/S  thrust · A/D  strafe', 'Mouse  aim · click to fire', 'Shift  afterburner · Space  ship ability', 'E  interact · M  star map', 'Tab  ship · K  captain · J  journal', 'Scroll  zoom · Esc  pause'];
       lines.forEach((l, i) => c.fillText(l, W - 22, H - 130 + i * 19));
     }
 
