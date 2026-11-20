@@ -147,6 +147,7 @@ export class World {
   killsHere = 0;
   playerDead = false;
   frameDt = 1 / 60;
+  spawnedKeys: string[] = [];
   pendingWins: { t: number; ev: string | undefined }[] = [];
   deathTimer = 0;
   nearest: { kind: 'poi'; poi: POI } | { kind: 'ship'; ship: Ship } | null = null;
@@ -286,8 +287,14 @@ export class World {
       this.shuntUsed = run.sys.shunt;
       this.frozenUsed = run.sys.frozen;
       this.killsHere = run.sys.kills;
+      this.wardenWaves = run.sys.waves ?? 0;
+      this.wardenNext = run.sys.next ?? 0;
+      const gone = new Set(run.sys.gone ?? []);
+      const hailed = new Set(run.sys.hailed ?? []);
+      this.ships = this.ships.filter((s) => !s.key || !gone.has(s.key));
+      for (const s of this.ships) if (s.key && hailed.has(s.key)) s.hailed = true;
     } else {
-      run.sys = { nodeId: node.id, used: [], arrivalDone: false, t: 0, saint: false, shunt: false, frozen: false, kills: 0 };
+      run.sys = { nodeId: node.id, used: [], arrivalDone: false, t: 0, saint: false, shunt: false, frozen: false, kills: 0, gone: [], hailed: [], waves: 0, next: 0 };
     }
   }
 
@@ -300,6 +307,11 @@ export class World {
     s.frozen = this.frozenUsed;
     s.kills = this.killsHere;
     s.used = this.pois.filter((p) => p.used).map((p) => p.id);
+    s.waves = this.wardenWaves;
+    s.next = this.wardenNext;
+    const alive = new Set(this.ships.filter((x) => x.key && !x.dead).map((x) => x.key));
+    s.gone = [...new Set([...(s.gone ?? []), ...this.spawnedKeys.filter((k) => !alive.has(k))])];
+    s.hailed = [...new Set(this.ships.filter((x) => x.key && x.hailed).map((x) => x.key).concat(s.hailed ?? []))];
   }
 
   /** re-evaluate hostility of faction ships after reputation or relic changes */
@@ -373,7 +385,12 @@ export class World {
     for (let i = 0; i < n; i++) {
       const s = this.makeEnemy({ faction: f, special, role: role ?? undefined, x: cx + rng.range(-150, 150), y: cy + rng.range(-150, 150) });
       s.patrolGroup = pg;
-      if (forceHostile) s.hostile = true;
+      s.key = `${pg}:${i}`; // deterministic per system seed, so saves can refer to it
+      this.spawnedKeys.push(s.key);
+      if (forceHostile) {
+        s.hostile = true;
+        s.provoked = true; // reputation changes must not pacify deliberately hostile patrols
+      }
       if (s.role === 'turret') {
         const d = this.pois.find((p) => p.kind === 'derelict');
         if (d) {
@@ -402,7 +419,7 @@ export class World {
       thrust: 400, maxSpeed: 250, turnRate: 4, weapons: [], sprite, role, level: 0, dmgMult: 1, aim: 0.1, contactDmg: 0, contactCd: 0,
       burn: 0, burnDps: 0, slow: 0, cloak: 0, invuln: 0, reflect: 0, overdrive: 0, flash: 0, shieldFlash: 0, dead: false, lifetime: 0,
       target: null, aiT: 0, orbitDir: Math.random() < 0.5 ? 1 : -1, aggro: false, wanderX: x, wanderY: y, fleeing: false, hailed: false, hailable: false,
-      group: 0, patrolGroup: 0, owner: null, boss: null, bossT: {}, phase: 0, xp: 0, credits: 0, lootChance: 0, elite: false, lastHitByPlayer: false, provoked: false, burnFromPlayer: false, thrusting: 0,
+      group: 0, patrolGroup: 0, owner: null, boss: null, bossT: {}, phase: 0, xp: 0, credits: 0, lootChance: 0, elite: false, lastHitByPlayer: false, provoked: false, burnFromPlayer: false, key: "", thrusting: 0,
     };
   }
 
@@ -1032,7 +1049,9 @@ export class World {
 
   private fireBeam(s: Ship, ws: WeaponStats, aim: number, cc: number, cm: number) {
     const fromPlayer = s.allied;
-    const dt = this.frameDt * (s.overdrive > 0 ? 1.6 : 1);
+    // fire-rate bonuses scale continuous damage (cooldown shrinks relative to the base)
+    const rate = ws.def.cooldown / Math.max(0.005, ws.cooldown);
+    const dt = this.frameDt * rate * (s.overdrive > 0 ? 1.6 : 1);
     const x1 = s.x + Math.cos(s.angle) * s.radius * 0.8, y1 = s.y + Math.sin(s.angle) * s.radius * 0.8;
     const a = s.isPlayer ? aim : s.angle;
     const dx = Math.cos(a), dy = Math.sin(a);

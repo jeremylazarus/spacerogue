@@ -269,6 +269,7 @@ export class Game {
     if (w.jump) return 'Drive already spooling.';
     if (w.playerDead) return 'Too late.';
     if (run.pending.some((p) => p.nodeId === run.nodeId && !p.cleared)) return 'Something here has locked onto your drive. Deal with it first.';
+    if (run.fuel <= 0 && w.player.hull <= w.player.maxHull * 0.2 + 1) return 'No fuel, and the hull is too weak to survive a dry jump. Find fuel or repairs.';
     w.startJump(id);
     return null;
   }
@@ -321,7 +322,7 @@ export class Game {
     if (p.markerIdx >= 0) {
       const m = run.markers[p.markerIdx];
       def = getEvent(m.eventId);
-      m.done = true;
+      // marker is marked done when its event closes, so a reload mid-event can't lose the arc step
     } else if (p.kind === 'finale') {
       if (run.pending.some((x) => x.nodeId === run.nodeId) || this.world?.bossShip) {
         this.ui.toast('Not now.', '#f98');
@@ -331,8 +332,10 @@ export class Game {
     } else {
       def = rng.chance(p.kind === 'planet' ? 0.75 : 1) ? pickEvent(run, p.site, p.owner ?? owner, rng, this.host) : null;
     }
-    if (p.kind !== 'finale') p.used = true; // the finale can always be re-entered
-    this.save();
+    if (p.kind !== 'finale' && p.markerIdx < 0) {
+      p.used = true; // the finale can always be re-entered; markers are consumed on close
+      this.save();
+    }
     if (def) this.queueEvent(def, p.owner ?? owner, p, null);
     else this.queueEvent(this.fallbackEvent(p), owner, p, null);
     this.pumpEvents();
@@ -368,6 +371,10 @@ export class Game {
     const sess = new EventSession(this.host, next.def, next.faction, next.poi?.name ?? next.ship?.name ?? '', hashSeed(run.seed, next.def.id, run.stats.events, run.nodeId));
     this.ui.showEvent(sess, () => {
       this.eventOpen = false;
+      if (next.poi && next.poi.markerIdx >= 0) {
+        run.markers[next.poi.markerIdx].done = true;
+        next.poi.used = true;
+      }
       this.applySessionResults(sess, next.ship);
       this.refresh();
       this.save();
@@ -474,8 +481,8 @@ export class Game {
     if (!run || run.outcome) return;
     run.outcome = { won, text };
     this.eventQueue = [];
-    // a life that never left the cradle carries nothing forward (prevents start/abandon farming)
-    const echoes = !won && run.stats.systems === 0 ? 0 : this.computeEchoes(run, won);
+    // abandoning in the cradle carries nothing forward (prevents start/abandon farming)
+    const echoes = abandoned && run.stats.systems === 0 ? 0 : this.computeEchoes(run, won);
     meta.echoes += echoes;
     meta.totalEchoes += echoes;
     if (won) {

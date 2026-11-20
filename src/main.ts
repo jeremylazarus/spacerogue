@@ -48,6 +48,7 @@ function frame(now: number) {
     renderer.drawBackdrop(now / 1000);
   }
   endFrameInput();
+  if (import.meta.env.DEV) (window as unknown as { __frames: number }).__frames = ((window as unknown as { __frames: number }).__frames ?? 0) + 1;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

@@ -272,7 +272,7 @@ export class EventSession {
       gainFuel: (n) => {
         const max = host.stats().maxFuel;
         const before = run.fuel;
-        run.fuel = Math.min(max, run.fuel + n);
+        run.fuel = Math.max(run.fuel, Math.min(max, run.fuel + n));
         if (run.fuel > before) self.add(`+${run.fuel - before} fuel`, 'good');
         else self.add('Fuel tanks already full', 'info');
       },

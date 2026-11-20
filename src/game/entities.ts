@@ -82,6 +82,7 @@ export interface Ship {
   elite: boolean;
   lastHitByPlayer: boolean;
   provoked: boolean;
+  key: string;
   burnFromPlayer: boolean;
   thrusting: number; // for engine fx 0..1
   tint?: string;

@@ -71,7 +71,7 @@ export interface RunState {
   outcome: null | { won: boolean; text: string };
   uidMax: number;
   /** per-system state that must survive save/continue */
-  sys: { nodeId: number; used: number[]; arrivalDone: boolean; t: number; saint: boolean; shunt: boolean; frozen: boolean; kills: number };
+  sys: { nodeId: number; used: number[]; arrivalDone: boolean; t: number; saint: boolean; shunt: boolean; frozen: boolean; kills: number; gone?: string[]; hailed?: string[]; waves?: number; next?: number };
   /** fights with narrative follow-ups that must survive save/continue */
   pending: { nodeId: number; spec: import('./api').CombatSpec; cleared?: boolean }[];
   peaceful: number;
