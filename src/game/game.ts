@@ -321,6 +321,7 @@ export class Game {
     let def: EventDef | null | undefined = null;
     if (p.markerIdx >= 0) {
       const m = run.markers[p.markerIdx];
+      if (m.done) return; // a story site plays once
       def = getEvent(m.eventId);
       // marker is marked done when its event closes, so a reload mid-event can't lose the arc step
     } else if (p.kind === 'finale') {

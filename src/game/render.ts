@@ -175,7 +175,7 @@ export class Renderer {
           const a = Math.atan2(world.star.y - poi.y, world.star.x - poi.x);
           c.rotate(a + Math.PI * 0.75);
         }
-        c.globalAlpha = poi.used && poi.kind !== 'planet' && poi.kind !== 'station' ? 0.55 : 1;
+        c.globalAlpha = poi.used && poi.kind !== 'planet' && !(poi.kind === 'station' && poi.site !== 'marker') ? 0.55 : 1;
         c.drawImage(poi.sprite, -sw / 2, -sw / 2);
         c.restore();
       } else if (poi.kind === 'anomaly') {
@@ -187,7 +187,7 @@ export class Renderer {
       if (poi.discovered && dist(poi.x, poi.y, p.x, p.y) < 1400) {
         c.font = `${13 / z}px "Segoe UI", system-ui, sans-serif`;
         c.textAlign = 'center';
-        c.fillStyle = poi.used && poi.kind !== 'station' ? 'rgba(180,190,210,0.4)' : 'rgba(210,225,255,0.8)';
+        c.fillStyle = poi.used && !(poi.kind === 'station' && poi.site !== 'marker') ? 'rgba(180,190,210,0.4)' : 'rgba(210,225,255,0.8)';
         c.fillText(poi.name, poi.x, poi.y + poi.r + 22 / z);
       }
     }
@@ -712,7 +712,7 @@ export class Renderer {
       if (!poi.discovered) continue;
       const x = cx + poi.x * scale, y = cy + poi.y * scale;
       const col = poi.site === 'marker' ? '#ffd36b' : poi.kind === 'station' ? '#9cf' : poi.kind === 'planet' ? '#8a9ab8' : poi.kind === 'distress' ? '#f86' : poi.kind === 'anomaly' ? '#c9f' : '#bba';
-      c.fillStyle = poi.used && poi.kind !== 'station' && poi.kind !== 'planet' ? 'rgba(150,150,160,0.4)' : col;
+      c.fillStyle = poi.used && !(poi.kind === 'station' && poi.site !== 'marker') && poi.kind !== 'planet' ? 'rgba(150,150,160,0.4)' : col;
       if (poi.kind === 'station') c.fillRect(x - 3, y - 3, 6, 6);
       else {
         c.beginPath();

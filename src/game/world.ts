@@ -280,7 +280,8 @@ export class World {
     this.wardenTime = wt;
     // restore per-system state after a save/continue
     if (run.sys.nodeId === node.id) {
-      for (const p of this.pois) if (run.sys.used.includes(p.id)) p.used = true;
+      // story sites rely on their marker's own done flag (their positional ids shift once earlier ones are done)
+      for (const p of this.pois) if (p.markerIdx < 0 && run.sys.used.includes(p.id)) p.used = true;
       this.arrivalT = run.sys.t;
       this.wardenWarned = this.wardenTime - this.arrivalT < 30;
       this.saintUsed = run.sys.saint;
@@ -743,7 +744,8 @@ export class World {
     this.nearest = null;
     let bd = 1e18;
     for (const poi of this.pois) {
-      if (poi.used && poi.kind !== 'station') continue;
+      // real stations stay dockable; everything else (including station-shaped story sites) is one-shot
+      if (poi.used && !(poi.kind === 'station' && poi.site !== 'marker')) continue;
       const d = dist2(poi.x, poi.y, p.x, p.y);
       const rr = poi.r + 150;
       if (d < rr * rr && d < bd) {
