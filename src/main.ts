@@ -62,10 +62,21 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-if (import.meta.env.DEV) (window as unknown as { __game: Game }).__game = game;
+if (import.meta.env.DEV) Object.assign(window, { __game: game, __audio: audio });
 
 // save on tab close
 addEventListener('beforeunload', () => game.save());
 
 // make sure the canvas HUD fonts are fetched early (canvas text doesn't trigger font loading by itself)
 for (const f of ['600 16px "Chakra Petch"', '500 16px "Chakra Petch"', '16px "Share Tech Mono"', '500 24px "Cormorant Garamond"', '600 24px "Cormorant Garamond"']) document.fonts?.load(f).catch(() => {});
+
+// pause the game and all sound while the tab is hidden; return to the pause menu so play resumes deliberately
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    audio.suspend();
+    if (game.world && !game.run?.outcome && !game.world.playerDead && !game.paused) ui.showPause();
+  } else {
+    audio.resume();
+    last = performance.now(); // no time jump on return
+  }
+});

@@ -1073,6 +1073,15 @@ export const audio = {
       /* audio unavailable */
     }
   },
+  /** pause all sound (e.g. tab hidden); the music scheduler follows ctx.currentTime so it pauses too */
+  suspend(): void {
+    // not gated on ctx.state: suspend/resume are async, so a quick hide/show must still end in the right state
+    if (ctx) void ctx.suspend().catch(() => {});
+  },
+  /** undo suspend() */
+  resume(): void {
+    if (ctx) void ctx.resume().catch(() => {});
+  },
   sfx(name: Sfx, opts?: { vol?: number; pitch?: number; pan?: number }): void {
     if (!ctx || ctx.state !== 'running') return;
     const now = performance.now();
