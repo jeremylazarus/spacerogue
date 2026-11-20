@@ -1,7 +1,16 @@
+import '@fontsource/chakra-petch/400.css';
+import '@fontsource/chakra-petch/500.css';
+import '@fontsource/chakra-petch/600.css';
+import '@fontsource/cormorant-garamond/500.css';
+import '@fontsource/cormorant-garamond/600.css';
+import '@fontsource/cormorant-garamond/500-italic.css';
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/share-tech-mono/400.css';
 import './ui/style.css';
 import { initInput, endFrameInput } from './core/input';
 import { audio } from './core/audio';
-import { Renderer } from './game/render';
+import { MENU_PALETTE, Renderer } from './game/render';
 import { Game } from './game/game';
 import { UI } from './ui/ui';
 import { meta } from './game/meta';
@@ -22,7 +31,7 @@ game.ui = ui;
 ui.toastFn = (m, c) => renderer.toast(m, c);
 ui.onTitle = () => {
   game.world = null;
-  renderer.setBackground(hashSeed('menu'));
+  renderer.setBackground(hashSeed('menu'), MENU_PALETTE);
   ui.showTitle();
 };
 ui.onTitle();
@@ -57,3 +66,6 @@ if (import.meta.env.DEV) (window as unknown as { __game: Game }).__game = game;
 
 // save on tab close
 addEventListener('beforeunload', () => game.save());
+
+// make sure the canvas HUD fonts are fetched early (canvas text doesn't trigger font loading by itself)
+for (const f of ['600 16px "Chakra Petch"', '500 16px "Chakra Petch"', '16px "Share Tech Mono"', '500 24px "Cormorant Garamond"', '600 24px "Cormorant Garamond"']) document.fonts?.load(f).catch(() => {});

@@ -342,9 +342,9 @@ export class UI implements UiBridge {
         } else if (v.portrait === 'officer') {
           seed = hashSeed(session.def.id);
         }
-        const pc = makePortrait(seed, arch, 150, c1, c2);
+        const pc = makePortrait(seed, arch, 180, c1, c2);
         pc.className = 'portrait';
-        pc.style.width = pc.style.height = '150px';
+        pc.style.width = pc.style.height = '180px';
         p.querySelector('.pt')!.appendChild(pc);
       }
     };
@@ -404,7 +404,7 @@ export class UI implements UiBridge {
         <button class="btn small" data-a="ship">Ship <span class="kbd">Tab</span></button><button class="btn" data-a="undock">Undock</button></div></div>
         <div class="pbody">${
           tab === 'market'
-            ? `<h3>For sale</h3><div class="cargo">${stock.map((m, i) => `<div class="card" data-buy="${i}" style="border-color:${RARITY_COLORS[m.rarity]}55"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${RARITY_NAMES[m.rarity]} ${m.slot}</div><div class="price">${price(m)}¢</div></div>`).join('') || '<div class="hint">Sold out.</div>'}</div>
+            ? `<h3>For sale</h3><div class="cargo">${stock.map((m, i) => `<div class="card" data-buy="${i}" style="--edge:${RARITY_COLORS[m.rarity]}55"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${RARITY_NAMES[m.rarity]} ${m.slot}</div><div class="price">${price(m)}¢</div></div>`).join('') || '<div class="hint">Sold out.</div>'}</div>
                <h3>Your cargo <span class="hint" style="text-transform:none;letter-spacing:0">— click to sell</span></h3><div class="cargo">${run.cargo.map((m, i) => `<div class="card" data-sell="${i}"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${RARITY_NAMES[m.rarity]} ${m.slot}</div><div class="price">+${sellP(m)}¢</div></div>`).join('') || '<div class="hint">Empty. Unequip modules in the ship screen to sell them.</div>'}</div>`
             : tab === 'yard'
               ? `<div class="service"><div class="grow"><b>Repair hull</b><span>${missing > 0 ? `${missing} damage to patch` : 'Hull is intact.'}</span></div><button class="btn" data-a="repair" ${missing > 0 && run.credits >= Math.min(repairCost, 1) ? '' : 'disabled'}>${missing > 0 ? (run.credits >= repairCost ? `Repair all · ${repairCost}¢` : `Repair what you can afford`) : 'Repaired'}</button></div>
@@ -533,7 +533,7 @@ export class UI implements UiBridge {
       const s = computeStats(run);
       const slotCard = (m: ModuleInst | null, kind: 'weapon' | 'utility', i: number) =>
         m
-          ? `<div class="card ${selected?.from === kind && selected.i === i ? 'sel' : ''}" draggable="true" data-from="${kind}" data-i="${i}" style="border-color:${RARITY_COLORS[m.rarity]}66"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${kind === 'weapon' ? (i % 2 === 0 ? 'Left mouse' : 'Right mouse') : 'Utility'}</div></div>`
+          ? `<div class="card ${selected?.from === kind && selected.i === i ? 'sel' : ''}" draggable="true" data-from="${kind}" data-i="${i}" style="--edge:${RARITY_COLORS[m.rarity]}66"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${kind === 'weapon' ? (i % 2 === 0 ? 'Left mouse' : 'Right mouse') : 'Utility'}</div></div>`
           : `<div class="card empty" data-from="${kind}" data-i="${i}">Empty ${kind} slot</div>`;
       const stat = (label: string, v: string) => `<div><span>${label}</span><span>${v}</span></div>`;
       p.innerHTML = `<div class="phead"><div><h2>${esc(run.shipName)}</h2><span class="hint">${h.name} · Captain ${esc(run.captain)}</span></div><div class="row"><span class="hint">Drag modules between slots and cargo · double-click to equip/unequip</span><button class="x" data-a="close">×</button></div></div>
@@ -548,10 +548,10 @@ export class UI implements UiBridge {
             ${stat('Scanner', Math.round(s.scanRange) + '')}${stat('Fuel', `${run.fuel}/${s.maxFuel}`)}
             ${s.drones ? stat('Drones', s.drones + '') : ''}${s.dodge ? stat('Evasion', Math.round(s.dodge * 100) + '%') : ''}${s.hullRegen ? stat('Hull repair', s.hullRegen.toFixed(1) + '/s') : ''}${s.lifesteal ? stat('Lifesteal', Math.round(s.lifesteal * 100) + '%') : ''}
           </div>
-          <h3>Relics</h3><div>${run.relics.map((r) => `<span class="tag" data-relic="${r}" style="border-color:#ffb34766;color:#ffd08a">${esc(RELICS[r].name)}</span>`).join('') || '<span class="hint">None yet.</span>'}</div>
+          <h3>Relics</h3><div>${run.relics.map((r) => `<span class="tag" data-relic="${r}" style="--edge:#ffb34766;color:#ffd08a">${esc(RELICS[r].name)}</span>`).join('') || '<span class="hint">None yet.</span>'}</div>
           <h3>Crew (${run.officers.length}/4)</h3><div>${run.officers.map((of) => `<span class="tag">${esc(of.name)} · ${ROLE_LABEL[of.role]} · +2 ${APT_LABEL[ROLE_APT[of.role]]}</span>`).join('') || '<span class="hint">No officers aboard.</span>'} <span class="hint">Details on the Captain screen (K).</span></div>
         </div><div>
-          <h3>Cargo (${run.cargo.length}/12)</h3><div class="cargo" data-cargo="1">${run.cargo.map((m, i) => `<div class="card ${selected?.from === 'cargo' && selected.i === i ? 'sel' : ''}" draggable="true" data-from="cargo" data-i="${i}" style="border-color:${RARITY_COLORS[m.rarity]}44"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${RARITY_NAMES[m.rarity]} ${m.slot}</div></div>`).join('')}<div class="card empty" data-from="cargo" data-i="-1">Drop here to unequip</div></div>
+          <h3>Cargo (${run.cargo.length}/12)</h3><div class="cargo" data-cargo="1">${run.cargo.map((m, i) => `<div class="card ${selected?.from === 'cargo' && selected.i === i ? 'sel' : ''}" draggable="true" data-from="cargo" data-i="${i}" style="--edge:${RARITY_COLORS[m.rarity]}44"><div class="nm" style="color:${RARITY_COLORS[m.rarity]}">${esc(moduleName(m))}</div><div class="kind">${RARITY_NAMES[m.rarity]} ${m.slot}</div></div>`).join('')}<div class="card empty" data-from="cargo" data-i="-1">Drop here to unequip</div></div>
           <div class="row" style="margin-top:12px"><button class="btn small danger" data-a="scrap" ${selected?.from === 'cargo' ? '' : 'disabled'}>Scrap selected</button><span class="hint">Scrapping a module yields a few credits.</span></div>
         </div></div></div>`;
       p.querySelectorAll<HTMLElement>('.card[draggable]').forEach((el) => {
@@ -697,7 +697,7 @@ export class UI implements UiBridge {
             return `<div class="node ${cls}" data-s="${s.id}" style="grid-column:${s.col + 1};grid-row:${s.row + 1}"><div class="nn">${esc(s.name)}</div><div class="rk">${rank}/${s.max}</div></div>`;
           }).join('')}</div></div>`).join('')}</div>
         <h3>Officers</h3>${run.officers.map((of) => `<div class="list-item"><b>${esc(of.name)}</b><span class="hint">${ROLE_LABEL[of.role]} · ${esc(of.species)} · ${esc(of.trait)} · +2 ${APT_LABEL[ROLE_APT[of.role]]}</span></div>`).join('') || '<div class="hint">No officers aboard. Stations sometimes have people looking for a berth.</div>'}
-        <h3>Standing</h3><div class="apts">${run.factions.map((f) => `<div class="apt" style="border-color:${f.color}55"><span style="color:${f.color}">${esc(f.short)}</span><b>${repLabel(run.rep[f.id] ?? 0)}</b></div>`).join('')}</div>
+        <h3>Standing</h3><div class="apts">${run.factions.map((f) => `<div class="apt" style="--edge:${f.color}55"><span style="color:${f.color}">${esc(f.short)}</span><b>${repLabel(run.rep[f.id] ?? 0)}</b></div>`).join('')}</div>
       </div>`;
       // connector lines
       requestAnimationFrame(() => p.querySelectorAll<HTMLElement>('.grid').forEach((g) => {
@@ -773,7 +773,7 @@ export class UI implements UiBridge {
         const [x1, y1] = pos(n), [x2, y2] = pos(m);
         const active = n.id === cur.id;
         const past = n.visited && m.visited;
-        c.strokeStyle = past ? 'rgba(140,200,255,0.55)' : active ? (l === hover || l === chosen ? 'rgba(255,220,130,0.95)' : 'rgba(200,220,255,0.55)') : n.col < cur.col ? 'rgba(100,110,140,0.12)' : 'rgba(150,170,220,0.18)';
+        c.strokeStyle = past ? 'rgba(79,224,200,0.55)' : active ? (l === hover || l === chosen ? 'rgba(255,217,152,0.95)' : 'rgba(255,190,92,0.6)') : n.col < cur.col ? 'rgba(110,90,60,0.15)' : 'rgba(168,116,47,0.3)';
         c.lineWidth = active ? 2.5 : 1.5;
         c.setLineDash(active && !(l === hover || l === chosen) ? [6, 6] : []);
         c.lineDashOffset = -t * 20;
@@ -795,12 +795,12 @@ export class UI implements UiBridge {
           c.arc(x, y, 26, 0, Math.PI * 2);
           c.fill();
         }
-        c.fillStyle = n.id === cur.id ? '#fff' : n.visited ? '#7ab' : reachable ? '#dfe8ff' : '#556';
+        c.fillStyle = n.id === cur.id ? '#ffd998' : n.visited ? '#2a8c80' : reachable ? '#ffbe5c' : '#4c3e2b';
         c.beginPath();
         c.arc(x, y, n.kind === 'final' ? 13 : n.id === hover ? 10 : 8, 0, Math.PI * 2);
         c.fill();
         if (n.id === cur.id) {
-          c.strokeStyle = '#8cf';
+          c.strokeStyle = '#4fe0c8';
           c.lineWidth = 2;
           c.beginPath();
           c.arc(x, y, 14 + Math.sin(t * 3) * 2, 0, Math.PI * 2);
@@ -813,7 +813,7 @@ export class UI implements UiBridge {
           c.arc(x, y, 15, 0, Math.PI * 2);
           c.stroke();
         }
-        c.font = '13px "Segoe UI", system-ui';
+        c.font = '600 13px "Chakra Petch", system-ui';
         c.textAlign = 'center';
         c.fillStyle = '#0a0e1a';
         if (n.known) {
