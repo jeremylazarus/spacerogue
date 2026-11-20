@@ -70,6 +70,11 @@ export interface RunState {
   log: string[];
   outcome: null | { won: boolean; text: string };
   uidMax: number;
+  /** per-system state that must survive save/continue */
+  sys: { nodeId: number; used: number[]; arrivalDone: boolean; t: number; saint: boolean; shunt: boolean; frozen: boolean; kills: number };
+  /** fights with narrative follow-ups that must survive save/continue */
+  pending: { nodeId: number; spec: import('./api').CombatSpec; cleared?: boolean }[];
+  peaceful: number;
 }
 
 const ARCHS: FactionArchetype[] = ['mercantile', 'zealot', 'hive', 'machine', 'ancient'];
@@ -140,6 +145,7 @@ export function createRun(seed: number, hullId: string, resonance: number, mainA
     skillPoints: perk('perk.skill'), skills: {}, flags: {}, rep, factions, mainArc, sideArcs: sideArcIds.map((id) => ({ id, at: rng.int(1, 3), begun: false })),
     journal: {}, finaleEvent: null, markers: [], usedEvents: [],
     stats: { kills: 0, systems: 0, creditsEarned: 0, bosses: 0, events: 0, killsThisStreak: 0, peacefulSystems: 0 }, log: [], outcome: null, uidMax: 0,
+    sys: { nodeId: 0, used: [], arrivalDone: false, t: 0, saint: false, shunt: false, frozen: false, kills: 0 }, pending: [], peaceful: 0,
   };
   if (perk('perk.officer') > 0) run.officers.push(makeOfficer(rng, factions));
   if (perk('perk.relic') > 0) run.relics.push(rng.pick(RELIC_IDS.filter((r) => r !== 'echo_shard')));
@@ -334,6 +340,9 @@ export function deserializeRun(json: string): RunState | null {
     const r = JSON.parse(json) as RunState;
     if (r.v !== 1 || !HULLS.some((h) => h.id === r.hullId)) return null;
     setUidCounter(r.uidMax + 1);
+    r.sys ??= { nodeId: r.nodeId, used: [], arrivalDone: true, t: 0, saint: false, shunt: false, frozen: false, kills: 0 };
+    r.pending ??= [];
+    r.peaceful ??= 0;
     return r;
   } catch {
     return null;

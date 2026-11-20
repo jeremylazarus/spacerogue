@@ -5,7 +5,7 @@ import { RELIC_IDS } from './api';
 import { EVENTS, EVENT_CODEX } from '../content/events';
 import { ARC_EVENTS } from '../content/arcs';
 import { CODEX } from '../content/codex';
-import { RELICS, moduleName, rollModule, rollRarity, type Stats } from './items';
+import { RELICS, moduleName, moduleValue, rollModule, rollRarity, type Stats } from './items';
 import { aptitude, computeStats, makeOfficer, nodeById, type RunState } from './run';
 import { meta, saveMeta, unlockedSet } from './meta';
 
@@ -115,6 +115,8 @@ export class EventSession {
     const choices: ChoiceView[] = this.visibleChoices.map((c) => ({ label: this.fmt(c.label), enabled: this.reqMet(c), req: this.reqText(c) }));
     const terminal = choices.length === 0;
     if (terminal) choices.push({ label: 'Continue', enabled: true, req: '' });
+    // never trap the player: if nothing is selectable, offer a way out
+    else if (!choices.some((c) => c.enabled)) choices.push({ label: 'Leave.', enabled: true, req: '' });
     return { title, text, lines: this.lines, choices, terminal, portrait: this.def.portrait ?? 'none', faction: this.faction };
   }
 
@@ -122,6 +124,11 @@ export class EventSession {
   choose(i: number): boolean {
     const n = this.nodeId ? this.def.nodes[this.nodeId] : null;
     if (!n || this.visibleChoices.length === 0) {
+      this.ended = true;
+      return true;
+    }
+    if (i === this.visibleChoices.length && !this.visibleChoices.some((x) => this.reqMet(x))) {
+      // the fallback "Leave" choice
       this.ended = true;
       return true;
     }
@@ -295,8 +302,14 @@ export class EventSession {
         const r2 = new RNG(rng.fork());
         const rarity = q?.rarity ?? Math.max(q?.minRarity ?? 0, rollRarity(r2, run.depth, host.stats().luck));
         const m = rollModule(r2, { slot: q?.slot, rarity: clamp(rarity, 0, 4), unlocked: unlockedSet() });
-        run.cargo.push(m);
         const name = moduleName(m);
+        if (run.cargo.length >= 12) {
+          const v = Math.round(moduleValue(m) * 0.35);
+          run.credits += v;
+          self.add(`Cargo full — ${name} sold off for ${v} credits`, 'info');
+          return name;
+        }
+        run.cargo.push(m);
         self.add(`Acquired: ${name}`, 'good');
         return name;
       },
@@ -371,8 +384,8 @@ export class EventSession {
         const cands = [...frontier].filter((id) => !run.markers.some((m) => m.nodeId === id && !m.done));
         const pool = cands.length ? cands : [...frontier];
         if (!pool.length) return false;
-        // prefer marking every reachable node in the column so the player can't miss it, unless there are many
-        const picks = pool.length <= 2 ? pool : [rng.pick(pool)];
+        // mark every reachable node in the column so the player can't route around the arc
+        const picks = pool;
         for (const nid of picks) {
           run.markers.push({ nodeId: nid, eventId: o.eventId, label: o.label, kind: o.kind ?? 'beacon', done: false });
           nodeById(run, nid).known = true;

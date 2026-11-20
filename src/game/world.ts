@@ -20,6 +20,7 @@ export interface WorldHooks {
   death(): void;
   jumped(nodeId: number): void;
   combatWon(afterVictory: string | undefined): void;
+  groupCleared(afterVictory: string | undefined): void;
   levelUp(levels: number): void;
   xp(n: number): void;
   bossKilled(id: BossId): void;
@@ -145,6 +146,8 @@ export class World {
   dronesRespawn = 0;
   killsHere = 0;
   playerDead = false;
+  frameDt = 1 / 60;
+  pendingWins: { t: number; ev: string | undefined }[] = [];
   deathTimer = 0;
   nearest: { kind: 'poi'; poi: POI } | { kind: 'ship'; ship: Ship } | null = null;
   bossShip: Ship | null = null;
@@ -274,6 +277,51 @@ export class World {
     if (run.relics.includes('hollow_idol')) wt *= 0.75;
     wt *= 1 - run.resonance * 0.05;
     this.wardenTime = wt;
+    // restore per-system state after a save/continue
+    if (run.sys.nodeId === node.id) {
+      for (const p of this.pois) if (run.sys.used.includes(p.id)) p.used = true;
+      this.arrivalT = run.sys.t;
+      this.wardenWarned = this.wardenTime - this.arrivalT < 30;
+      this.saintUsed = run.sys.saint;
+      this.shuntUsed = run.sys.shunt;
+      this.frozenUsed = run.sys.frozen;
+      this.killsHere = run.sys.kills;
+    } else {
+      run.sys = { nodeId: node.id, used: [], arrivalDone: false, t: 0, saint: false, shunt: false, frozen: false, kills: 0 };
+    }
+  }
+
+  /** copy transient per-system state into the run so saves capture it */
+  syncSys() {
+    const s = this.run.sys;
+    s.t = this.arrivalT;
+    s.saint = this.saintUsed;
+    s.shunt = this.shuntUsed;
+    s.frozen = this.frozenUsed;
+    s.kills = this.killsHere;
+    s.used = this.pois.filter((p) => p.used).map((p) => p.id);
+  }
+
+  /** re-evaluate hostility of faction ships after reputation or relic changes */
+  syncHostility() {
+    for (const s of this.ships) {
+      if (s.dead || s.allied || !s.faction || s.provoked || s.group) continue;
+      const h = this.hostileByRep(s.faction) && s.role !== 'trader';
+      if (h !== s.hostile) {
+        s.hostile = h;
+        if (!h) {
+          s.aggro = false;
+          s.target = null;
+        }
+      }
+    }
+  }
+
+  hostileByRep(f: Faction): boolean {
+    const rep = this.run.rep[f.id] ?? 0;
+    if (f.archetype === 'raider' && this.run.relics.includes('rust_crown')) return rep <= -70;
+    if (f.archetype === 'zealot' && this.run.relics.includes('pilgrim_lamp')) return rep <= -60;
+    return isHostileRep(rep);
   }
 
   private addPoi(kind: POI['kind'], name: string, r: number, site: POI['site'], orbitR: number, phase: number, still = false): POI {
@@ -291,7 +339,8 @@ export class World {
     const run = this.run;
     const depth = run.depth;
     if (node.kind === 'start' || node.kind === 'final') {
-      if (node.kind === 'start') this.spawnPatrol(this.owner ?? run.factions.find((f) => f.archetype === 'mercantile') ?? null, 'trader', 1, false);
+      const friendly = this.owner ?? run.factions.find((f) => f.archetype === 'mercantile') ?? run.factions.find((f) => f.archetype === 'machine') ?? null;
+      if (node.kind === 'start' && friendly) this.spawnPatrol(friendly, 'trader', 1, false);
       return;
     }
     const raider = run.factions.find((f) => f.archetype === 'raider')!;
@@ -353,7 +402,7 @@ export class World {
       thrust: 400, maxSpeed: 250, turnRate: 4, weapons: [], sprite, role, level: 0, dmgMult: 1, aim: 0.1, contactDmg: 0, contactCd: 0,
       burn: 0, burnDps: 0, slow: 0, cloak: 0, invuln: 0, reflect: 0, overdrive: 0, flash: 0, shieldFlash: 0, dead: false, lifetime: 0,
       target: null, aiT: 0, orbitDir: Math.random() < 0.5 ? 1 : -1, aggro: false, wanderX: x, wanderY: y, fleeing: false, hailed: false, hailable: false,
-      group: 0, patrolGroup: 0, owner: null, boss: null, bossT: {}, phase: 0, xp: 0, credits: 0, lootChance: 0, elite: false, lastHitByPlayer: false, thrusting: 0,
+      group: 0, patrolGroup: 0, owner: null, boss: null, bossT: {}, phase: 0, xp: 0, credits: 0, lootChance: 0, elite: false, lastHitByPlayer: false, provoked: false, burnFromPlayer: false, thrusting: 0,
     };
   }
 
@@ -364,7 +413,7 @@ export class World {
     const oldMax = p.maxHull;
     p.maxHull = st.maxHull;
     if (fill) p.hull = Math.min(this.run.hull, st.maxHull);
-    else if (st.maxHull > oldMax) p.hull = Math.min(st.maxHull, p.hull + (st.maxHull - oldMax));
+    void oldMax; // raising max hull never heals (prevents re-equip repair loops)
     p.hull = Math.min(p.hull, st.maxHull);
     p.maxShield = st.maxShield;
     if (fill) p.shield = st.maxShield;
@@ -391,7 +440,6 @@ export class World {
     });
     const h = hullDef(this.run.hullId);
     this.abilityMax = h.abilityCd * st.abilityCdMult;
-    this.run.fuel = Math.min(this.run.fuel, st.maxFuel);
   }
 
   spawnDrones() {
@@ -464,13 +512,8 @@ export class World {
     else s.hailable = !!o.faction && rng.chance(0.85);
     if (o.special) s.hailable = false;
     // hostility by reputation
-    if (o.faction) {
-      const rep = this.run.rep[o.faction.id] ?? 0;
-      let hostile = isHostileRep(rep);
-      if (o.faction.archetype === 'raider' && this.run.relics.includes('rust_crown')) hostile = rep <= -70;
-      if (o.faction.archetype === 'zealot' && this.run.relics.includes('pilgrim_lamp')) hostile = rep <= -60;
-      s.hostile = hostile && role !== 'trader';
-    } else s.hostile = true;
+    if (o.faction) s.hostile = this.hostileByRep(o.faction) && role !== 'trader';
+    else s.hostile = true;
     return s;
   }
 
@@ -561,6 +604,7 @@ export class World {
     if (spec.announce) this.hooks.toast(spec.announce, '#ff8a7a');
     if (g.members.size === 0) {
       this.groups.delete(gid);
+      this.hooks.groupCleared(spec.afterVictory);
       this.hooks.combatWon(spec.afterVictory);
     } else if (!spec.boss) audio.setMood('combat');
   }
@@ -623,8 +667,16 @@ export class World {
       this.timeScale = 0.35;
     } else this.timeScale = 1;
     const dt = Math.min(rawDt, 1 / 30) * this.timeScale;
+    this.frameDt = dt;
     this.t += dt;
     this.arrivalT += dt;
+    // delayed narrative follow-ups run on world time so they can't leak into another system
+    for (const w of this.pendingWins) w.t -= dt;
+    const due = this.pendingWins.filter((w) => w.t <= 0);
+    if (due.length) {
+      this.pendingWins = this.pendingWins.filter((w) => w.t > 0);
+      for (const w of due) this.hooks.combatWon(w.ev);
+    }
     this.shake = Math.max(0, this.shake - rawDt * 30);
     // orbits
     for (const p of this.pois) {
@@ -750,6 +802,14 @@ export class World {
       const single = p.weapons.length === 1 && (fire0 || fire1);
       w.beamOn = false;
       if (!(want || single)) continue;
+      if (w.ws.def.kind === 'beam') {
+        // continuous: energy and damage scale with real frame time
+        const cost = (w.ws.energy * dt) / w.ws.def.cooldown;
+        if (p.energy < cost) continue;
+        p.energy -= cost;
+        this.fireWeapon(p, w, aimA);
+        continue;
+      }
       if (w.cd > 0) continue;
       if (p.energy < w.ws.energy) continue;
       p.energy -= w.ws.energy;
@@ -880,13 +940,20 @@ export class World {
   fireWeapon(s: Ship, w: WeaponSlot, aim: number) {
     const ws = w.ws;
     const fromPlayer = s.allied;
-    w.shots++;
     const isPlayer = s.isPlayer;
     let critChance = 0, critMult = 2;
     if (fromPlayer) {
       critChance = this.stats.critChance + ws.critBonus;
       critMult = this.stats.critMult;
     }
+    if (ws.def.kind === 'beam') {
+      // continuous weapon: fired every frame, no shot counters (storm/comet)
+      w.beamOn = true;
+      if (isPlayer && s.cloak > 0) s.cloak = 0;
+      this.fireBeam(s, ws, aim, critChance, critMult);
+      return;
+    }
+    w.shots++;
     let forceCrit = false;
     if (isPlayer && s.cloak > 0) {
       forceCrit = true;
@@ -897,14 +964,9 @@ export class World {
     const vol = isPlayer ? 0.55 : 0.25;
     const pan = clamp((s.x - this.player.x) / 900, -1, 1);
     const k = ws.def.kind;
-    if (!(k === 'beam')) audio.sfx(ws.def.sfx as Sfx, { vol: isPlayer ? vol : vol * this.falloff(s), pan, pitch: isPlayer ? 1 : 0.85 + Math.random() * 0.2 });
+    audio.sfx(ws.def.sfx as Sfx, { vol: isPlayer ? vol : vol * this.falloff(s), pan, pitch: isPlayer ? 1 : 0.85 + Math.random() * 0.2 });
     const volleys = isPlayer && hasSkillFlag(this.run, 'storm') && w.shots % 10 === 0 ? 2 : 1;
     for (let v = 0; v < volleys; v++) {
-      if (k === 'beam') {
-        w.beamOn = true;
-        this.fireBeam(s, ws, aim, critChance, critMult);
-        continue;
-      }
       if (k === 'rail') {
         this.fireRail(s, ws, aim, critChance, critMult, forceCrit);
         continue;
@@ -970,7 +1032,7 @@ export class World {
 
   private fireBeam(s: Ship, ws: WeaponStats, aim: number, cc: number, cm: number) {
     const fromPlayer = s.allied;
-    const dt = 1 / 60;
+    const dt = this.frameDt * (s.overdrive > 0 ? 1.6 : 1);
     const x1 = s.x + Math.cos(s.angle) * s.radius * 0.8, y1 = s.y + Math.sin(s.angle) * s.radius * 0.8;
     const a = s.isPlayer ? aim : s.angle;
     const dx = Math.cos(a), dy = Math.sin(a);
@@ -1077,7 +1139,7 @@ export class World {
   // -------------------------------------------------------------------------
   // Damage
   // -------------------------------------------------------------------------
-  damage(t: Ship, amt: number, o: { src: Ship | null; fromPlayer: boolean; ion?: boolean; crit?: boolean; tags?: Set<string>; x?: number; y?: number; beam?: boolean; aoe?: boolean }): number {
+  damage(t: Ship, amt: number, o: { src: Ship | null; fromPlayer: boolean; ion?: boolean; crit?: boolean; tags?: Set<string>; x?: number; y?: number; beam?: boolean; aoe?: boolean; hazard?: boolean; dot?: boolean }): number {
     if (t.dead || t.invuln > 0 || amt <= 0) return 0;
     const run = this.run;
     if (t.isPlayer && !o.beam && !o.aoe && this.stats.dodge > 0 && Math.random() < this.stats.dodge) {
@@ -1111,6 +1173,7 @@ export class World {
     if (o.tags && o.fromPlayer !== undefined) {
       if (o.tags.has('burn')) {
         t.burn = 3;
+        t.burnFromPlayer = o.fromPlayer;
         t.burnDps = Math.max(t.burnDps, amt * (o.beam ? 2 : 0.3));
       }
       if (o.tags.has('cryo')) t.slow = 2;
@@ -1164,6 +1227,7 @@ export class World {
   provoke(t: Ship) {
     const wasHostile = t.hostile;
     t.hostile = true;
+    t.provoked = true;
     t.aggro = true;
     t.hailable = false;
     t.fleeing = t.role === 'trader';
@@ -1174,6 +1238,7 @@ export class World {
         if (s.dead || s.allied || s === t || s.faction?.id !== t.faction.id) continue;
         if (dist2(s.x, s.y, t.x, t.y) < 1500 * 1500) {
           s.hostile = true;
+          s.provoked = true;
           s.aggro = true;
           s.hailable = false;
           if (s.role === 'trader') s.fleeing = true;
@@ -1289,7 +1354,8 @@ export class World {
     }
     if (g.members.size === 0) {
       this.groups.delete(gid);
-      setTimeout(() => this.hooks.combatWon(g.afterVictory), 900);
+      this.hooks.groupCleared(g.afterVictory);
+      this.pendingWins.push({ t: 0.9, ev: g.afterVictory });
     }
   }
 
@@ -1750,9 +1816,9 @@ export class World {
     // status
     if (s.burn > 0) {
       s.burn -= dt;
-      s.hull -= s.burnDps * dt;
+      // route through the damage pipeline so armor, relics and death-saves apply
+      this.damage(s, s.burnDps * dt, { src: s.burnFromPlayer ? this.player : null, fromPlayer: s.burnFromPlayer, beam: true, dot: true });
       if (Math.random() < 0.3) this.part(s.x + (Math.random() - 0.5) * s.radius, s.y + (Math.random() - 0.5) * s.radius, 0, -20, 0.5, 4, '#f84', true, 0.95);
-      if (s.hull <= 0) this.kill(s, this.player, { fromPlayer: true });
     }
     if (s.slow > 0) s.slow -= dt;
     if (s.cloak > 0) s.cloak -= dt;
@@ -2115,7 +2181,7 @@ export class World {
       if (s.t <= 0 && s.t > -100) {
         s.t = -1000;
         for (const sh of this.ships) if (!sh.dead && dist(sh.x, sh.y, s.x, s.y) < s.r + sh.radius) {
-          this.damage(sh, 22 + this.run.depth * 5, { src: null, fromPlayer: !sh.allied, aoe: true });
+          this.damage(sh, 22 + this.run.depth * 5, { src: null, fromPlayer: false, aoe: true, hazard: true });
           sh.energy *= 0.4;
         }
         for (let i = 0; i < 4; i++) this.line(s.x + (Math.random() - 0.5) * 60, s.y - 700, s.x, s.y, '#bdf', 3, 0.3, true);
@@ -2139,8 +2205,9 @@ export class World {
       if (this.wardenNext <= 0) {
         this.wardenWaves++;
         this.wardenNext = 40;
-        const n = 2 + Math.floor(this.run.depth / 2) + this.wardenWaves;
-        this.startCombat({ side: 'warden', count: Math.min(9, n), strength: 1 + this.wardenWaves * 0.15 });
+        const alive = this.ships.filter((s) => s.side === 'warden' && !s.dead).length;
+        const n = Math.min(9, 2 + Math.floor(this.run.depth / 2) + this.wardenWaves, 14 - alive);
+        if (n > 0) this.startCombat({ side: 'warden', count: n, strength: 1 + this.wardenWaves * 0.15 });
         if (this.wardenWaves === 1) this.hooks.toast('Wardens.', '#ffffff');
       }
     }

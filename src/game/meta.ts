@@ -54,7 +54,7 @@ export function saveMeta() {
 export function resetMeta() {
   meta = fresh();
   saveMeta();
-  localStorage.removeItem(RUN_KEY);
+  try { localStorage.removeItem(RUN_KEY); } catch { /* ignore */ }
 }
 
 export function saveRunRaw(json: string) {
@@ -65,10 +65,10 @@ export function saveRunRaw(json: string) {
   }
 }
 export function loadRunRaw(): string | null {
-  return localStorage.getItem(RUN_KEY);
+  try { return localStorage.getItem(RUN_KEY); } catch { return null; }
 }
 export function clearRun() {
-  localStorage.removeItem(RUN_KEY);
+  try { localStorage.removeItem(RUN_KEY); } catch { /* ignore */ }
 }
 
 export const perk = (id: string) => meta.perks[id] ?? 0;

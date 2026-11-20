@@ -5,7 +5,7 @@ import { ARCS } from '../content/arcs';
 import { EventSession, getEvent, pickEvent, registerEvents, type EventHost } from './events';
 import { World } from './world';
 import type { POI, Ship } from './entities';
-import { computeStats, createRun, currentNode, deserializeRun, factionById, gainXp, nodeById, serializeRun, type RunState } from './run';
+import { computeStats, createRun, currentNode, deserializeRun, factionById, gainXp, learn, nodeById, serializeRun, type RunState } from './run';
 import { clearRun, DEEDS, hasDeed, loadRunRaw, meta, perk, saveMeta, saveRunRaw } from './meta';
 import type { Stats } from './items';
 
@@ -102,7 +102,8 @@ export class Game {
     // don't repeat the previous main arc if possible
     const last = meta.metaFlags['engine.lastMainArc'];
     const pool = mains.length > 1 ? mains.filter((a) => a.id !== last) : mains;
-    const main = rng.weighted(pool, (a) => (a.weight ?? 1) * (a.id === 'origin' ? 2.5 : 1));
+    const forced = import.meta.env.DEV ? (globalThis as { __forceArc?: string }).__forceArc : undefined;
+    const main = (forced && ARCS.find((a) => a.id === forced)) || rng.weighted(pool, (a) => (a.weight ?? 1) * (a.id === 'origin' ? 2.5 : 1));
     const sides = rng.shuffle(ARCS.filter((a) => a.kind === 'side' && (!a.eligible || a.eligible(mv)))).slice(0, rng.int(1, 2));
     meta.runs++;
     meta.metaFlags['engine.lastMainArc'] = main.id;
@@ -124,12 +125,36 @@ export class Game {
     const run = deserializeRun(raw);
     if (!run) return false;
     this.run = run;
+    this.peacefulStreak = run.peaceful;
     this.enterSystem(false);
     return true;
   }
 
   save() {
-    if (this.run && !this.run.outcome) saveRunRaw(serializeRun(this.run));
+    if (!this.run || this.run.outcome) return;
+    if (this.world?.playerDead) {
+      // death is final: never persist a state from before the killing blow
+      this.endRun(false, '');
+      return;
+    }
+    if (this.world) {
+      this.world.syncSys();
+      this.run.hull = this.world.player.hull;
+    }
+    this.run.peaceful = this.peacefulStreak;
+    saveRunRaw(serializeRun(this.run));
+  }
+
+  learnSkill(id: string): boolean {
+    const run = this.run!;
+    const before = computeStats(run).maxHull;
+    const hullBefore = this.world ? this.world.player.hull : run.hull;
+    if (!learn(run, id)) return false;
+    this.refresh();
+    const gain = computeStats(run).maxHull - before;
+    if (gain > 0 && this.world) this.world.player.hull = Math.min(this.world.player.maxHull, hullBefore + gain);
+    audio.sfx('levelup', { vol: 0.5 });
+    return true;
   }
 
   private enterSystem(fresh: boolean) {
@@ -148,13 +173,18 @@ export class Game {
       death: () => this.endRun(false, ''),
       jumped: (id) => this.onJumped(id),
       combatWon: (ev) => this.onCombatWon(ev),
+      groupCleared: (ev) => this.clearPending(ev),
       levelUp: () => {},
       xp: (n) => this.addXp(n),
       bossKilled: () => this.grantDeed('deed.boss'),
       playerKill: () => {},
     });
+    // fights with narrative follow-ups resume after a continue
+    this.flushClearedPending();
+    if (!fresh) for (const p of run.pending) if (p.nodeId === run.nodeId) this.world.startCombat(p.spec);
+    run.pending = run.pending.filter((p) => p.nodeId === run.nodeId);
     this.save();
-    meta.life.systems++;
+    if (fresh) meta.life.systems++;
     meta.life.bestDepth = Math.max(meta.life.bestDepth, run.depth);
     if (run.depth >= 3) this.grantDeed('deed.depth3');
     if (run.depth >= 6) this.grantDeed('deed.depth6');
@@ -166,7 +196,8 @@ export class Game {
       this.beginArc(run.mainArc);
     } else if (run.depth === 0 && !run.flags['engine.mainBegun']) this.beginArc(run.mainArc);
     for (const s of run.sideArcs) if (!s.begun && run.depth >= s.at && run.depth < run.finalDepth) this.beginArc(s.id);
-    if (run.depth > 0 && node.kind !== 'final') {
+    if (run.depth > 0 && node.kind !== 'final' && !run.sys.arrivalDone) {
+      run.sys.arrivalDone = true;
       const rng = new RNG(hashSeed(run.seed, 'arrival', node.id));
       if (rng.chance(0.12)) {
         const ev = pickEvent(run, 'arrival', factionById(run, node.owner), rng, this.host);
@@ -197,6 +228,7 @@ export class Game {
     } catch (e) {
       console.error('arc begin failed', id, e);
     }
+    for (const l of sess.lines) if (l.kind !== 'check') this.ui.toast(l.text, l.kind === 'bad' ? '#f98' : l.kind === 'good' ? '#9e9' : '#cdb');
     this.applySessionResults(sess, null);
     this.save();
   }
@@ -207,6 +239,19 @@ export class Game {
       this.peacefulStreak++;
       if (this.peacefulStreak >= 4) this.grantDeed('deed.pacifist');
     } else this.peacefulStreak = 0;
+    // fuel is spent on arrival, so saving mid-spool can't lose it
+    if (run.fuel > 0) {
+      run.fuel--;
+      if (run.skills['w_drift'] && Math.random() < 0.25) {
+        run.fuel++;
+        this.ui.toast('The lane gives back a little fuel.', '#8ef');
+      }
+    } else {
+      const p = this.world!.player;
+      const cost = Math.min(Math.round(p.maxHull * 0.2), Math.max(0, p.hull - 1));
+      p.hull -= cost;
+      this.ui.toast(`Dry jump: the drive tears at the hull (−${cost})`, '#f98');
+    }
     run.hull = this.world!.player.hull;
     run.depth = nodeById(run, id).col;
     run.nodeId = id;
@@ -222,19 +267,8 @@ export class Game {
     const node = currentNode(run);
     if (!node.links.includes(id)) return 'No lane connects there.';
     if (w.jump) return 'Drive already spooling.';
-    if (run.fuel <= 0) {
-      // emergency: burn hull to jump
-      const cost = Math.round(w.player.maxHull * 0.2);
-      if (w.player.hull <= cost + 1) return 'No fuel — and the hull could not survive a dry jump.';
-      w.player.hull -= cost;
-      this.ui.toast(`Dry jump: the drive tears at the hull (−${cost})`, '#f98');
-    } else {
-      run.fuel--;
-      if (computeStats(run) && run.skills['w_drift'] && Math.random() < 0.25) {
-        run.fuel++;
-        this.ui.toast('The lane gives back a little fuel.', '#8ef');
-      }
-    }
+    if (w.playerDead) return 'Too late.';
+    if (run.pending.some((p) => p.nodeId === run.nodeId && !p.cleared)) return 'Something here has locked onto your drive. Deal with it first.';
     w.startJump(id);
     return null;
   }
@@ -253,6 +287,7 @@ export class Game {
     if (this.world) {
       this.world.refreshPlayer(false);
       this.world.spawnDrones();
+      this.world.syncHostility();
     }
     const run = this.run!;
     if (run.relics.length >= 3) this.grantDeed('deed.relics3');
@@ -288,11 +323,16 @@ export class Game {
       def = getEvent(m.eventId);
       m.done = true;
     } else if (p.kind === 'finale') {
+      if (run.pending.some((x) => x.nodeId === run.nodeId) || this.world?.bossShip) {
+        this.ui.toast('Not now.', '#f98');
+        return;
+      }
       def = getEvent(run.finaleEvent ?? '') ?? FALLBACK_FINALE;
     } else {
       def = rng.chance(p.kind === 'planet' ? 0.75 : 1) ? pickEvent(run, p.site, p.owner ?? owner, rng, this.host) : null;
     }
-    p.used = true;
+    if (p.kind !== 'finale') p.used = true; // the finale can always be re-entered
+    this.save();
     if (def) this.queueEvent(def, p.owner ?? owner, p, null);
     else this.queueEvent(this.fallbackEvent(p), owner, p, null);
     this.pumpEvents();
@@ -309,6 +349,7 @@ export class Game {
   private onHail(s: Ship) {
     const run = this.run!;
     s.hailed = true;
+    this.save();
     const rng = new RNG(hashSeed(run.seed, run.nodeId, s.id, 'hail'));
     const def = pickEvent(run, 'hail', s.faction, rng, this.host) ?? this.fallbackHail();
     this.queueEvent(def, s.faction, null, s);
@@ -320,7 +361,7 @@ export class Game {
   }
 
   private pumpEvents() {
-    if (this.eventOpen || this.eventQueue.length === 0 || !this.run) return;
+    if (this.eventOpen || this.eventQueue.length === 0 || !this.run || this.run.outcome || this.world?.playerDead) return;
     const next = this.eventQueue.shift()!;
     const run = this.run;
     this.eventOpen = true;
@@ -357,11 +398,38 @@ export class Game {
   }
 
   private startCombat(spec: CombatSpec, ship: Ship | null) {
-    this.world?.startCombat(spec, ship);
+    if (!this.world || !this.run) return;
+    if (spec.afterVictory) this.run.pending.push({ nodeId: this.run.nodeId, spec });
+    this.world.startCombat(spec, ship);
+  }
+
+  /** the fight is over; its follow-up fires shortly (on world time) */
+  private clearPending(ev: string | undefined) {
+    if (!ev || !this.run) return;
+    const p = this.run.pending.find((x) => x.spec.afterVictory === ev && x.nodeId === this.run!.nodeId && !x.cleared);
+    if (p) p.cleared = true;
+  }
+
+  /** fire follow-ups for fights already won but whose event hasn't shown (e.g. after reload or a quick jump) */
+  private flushClearedPending() {
+    const run = this.run!;
+    const due = run.pending.filter((p) => p.cleared);
+    run.pending = run.pending.filter((p) => !p.cleared);
+    for (const p of due) {
+      const d = getEvent(p.spec.afterVictory!);
+      if (d) this.queueEvent(d, factionById(run, currentNode(run).owner), null, null);
+    }
   }
 
   private onCombatWon(ev: string | undefined) {
-    if (!ev || !this.run || this.run.outcome) return;
+    if (!this.run || this.run.outcome) return;
+    if (ev) {
+      const i = this.run.pending.findIndex((p) => p.spec.afterVictory === ev && p.nodeId === this.run!.nodeId && p.cleared);
+      if (i < 0) return; // already flushed elsewhere
+      this.run.pending.splice(i, 1);
+    }
+    this.save();
+    if (!ev) return;
     const d = getEvent(ev);
     if (!d) return;
     this.queueEvent(d, factionById(this.run, currentNode(this.run).owner), null, null);
@@ -401,11 +469,13 @@ export class Game {
   // -------------------------------------------------------------------------
   // End
   // -------------------------------------------------------------------------
-  endRun(won: boolean, text: string) {
+  endRun(won: boolean, text: string, abandoned = false) {
     const run = this.run;
     if (!run || run.outcome) return;
     run.outcome = { won, text };
-    const echoes = this.computeEchoes(run, won);
+    this.eventQueue = [];
+    // a life that never left the cradle carries nothing forward (prevents start/abandon farming)
+    const echoes = !won && run.stats.systems === 0 ? 0 : this.computeEchoes(run, won);
     meta.echoes += echoes;
     meta.totalEchoes += echoes;
     if (won) {
@@ -414,7 +484,7 @@ export class Game {
       this.grantDeed('deed.win');
     } else {
       meta.life.deaths++;
-      if (run.depth === 0 && run.stats.systems === 0) this.grantDeed('deed.died_early');
+      if (!abandoned && run.depth === 0 && run.stats.systems === 0) this.grantDeed('deed.died_early');
     }
     meta.lastShips.unshift(run.shipName);
     meta.lastShips = meta.lastShips.slice(0, 10);
@@ -436,7 +506,7 @@ export class Game {
   }
 
   abandon() {
-    this.endRun(false, 'You let go.');
+    this.endRun(false, 'You let go.', true);
   }
 
   stats(): Stats {

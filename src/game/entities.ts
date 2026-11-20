@@ -81,6 +81,8 @@ export interface Ship {
   lootChance: number;
   elite: boolean;
   lastHitByPlayer: boolean;
+  provoked: boolean;
+  burnFromPlayer: boolean;
   thrusting: number; // for engine fx 0..1
   tint?: string;
 }

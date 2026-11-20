@@ -209,13 +209,16 @@ export class Renderer {
       const col = k.kind === 'credits' ? '#ffd76a' : k.kind === 'repair' ? '#7f7' : k.kind === 'energy' ? '#8cf' : k.kind === 'fuel' ? '#8ef' : RARITY_COLORS[k.module!.rarity];
       c.globalCompositeOperation = 'lighter';
       const sz = k.kind === 'module' ? 9 : k.kind === 'credits' ? 3.5 : 6;
-      const g = c.createRadialGradient(k.x, k.y, 0, k.x, k.y, sz * 3 * pulse);
-      g.addColorStop(0, col);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      c.fillStyle = g;
+      c.fillStyle = col;
+      c.globalAlpha = 0.12;
       c.beginPath();
       c.arc(k.x, k.y, sz * 3 * pulse, 0, TAU);
       c.fill();
+      c.globalAlpha = 0.25;
+      c.beginPath();
+      c.arc(k.x, k.y, sz * 1.8 * pulse, 0, TAU);
+      c.fill();
+      c.globalAlpha = 1;
       c.globalCompositeOperation = 'source-over';
       c.fillStyle = col;
       if (k.kind === 'module') {
@@ -273,16 +276,22 @@ export class Renderer {
         continue;
       }
       const len = pr.kind === 'bullet' || pr.kind === 'shrapnel' ? Math.min(26, Math.hypot(pr.vx, pr.vy) * 0.022) : pr.size * 2;
-      const grd = c.createLinearGradient(pr.x - Math.cos(a) * len, pr.y - Math.sin(a) * len, pr.x, pr.y);
-      grd.addColorStop(0, 'rgba(0,0,0,0)');
-      grd.addColorStop(1, pr.color);
-      c.strokeStyle = grd;
+      // two-segment tail (cheaper than a per-projectile gradient)
+      const ca = Math.cos(a), sa = Math.sin(a);
+      c.strokeStyle = pr.color;
       c.lineCap = 'round';
       c.lineWidth = pr.size * (pr.fromPlayer ? 1 : 1.3);
+      c.globalAlpha = 0.3;
       c.beginPath();
-      c.moveTo(pr.x - Math.cos(a) * len, pr.y - Math.sin(a) * len);
+      c.moveTo(pr.x - ca * len, pr.y - sa * len);
+      c.lineTo(pr.x - ca * len * 0.5, pr.y - sa * len * 0.5);
+      c.stroke();
+      c.globalAlpha = 0.85;
+      c.beginPath();
+      c.moveTo(pr.x - ca * len * 0.5, pr.y - sa * len * 0.5);
       c.lineTo(pr.x, pr.y);
       c.stroke();
+      c.globalAlpha = 1;
       c.fillStyle = '#fff';
       c.beginPath();
       c.arc(pr.x, pr.y, pr.size * 0.5, 0, TAU);

@@ -10,7 +10,7 @@ import type { POI } from '../game/entities';
 import { HULLS, RARITY_COLORS, RARITY_NAMES, RELICS, describeModule, fmtMod, hullDef, moduleName, moduleValue, rollModule, type ModuleInst } from '../game/items';
 import { SKILLS, TREES, skillById } from '../game/skills';
 import { APTITUDES } from '../game/api';
-import { ROLE_APT, aptitude, canLearn, computeStats, currentNode, factionById, learn, makeOfficer, nodeById, repLabel, type RunState } from '../game/run';
+import { ROLE_APT, aptitude, canLearn, computeStats, currentNode, factionById, makeOfficer, nodeById, repLabel, type RunState } from '../game/run';
 import { DEEDS, LEGACY, hasDeed, hullUnlocked, meta, perk, resetMeta, saveMeta, unlockedSet } from '../game/meta';
 import { playerSprite } from '../game/world';
 import { ARCS } from '../content/arcs';
@@ -74,15 +74,20 @@ export class UI implements UiBridge {
     this.hideTip();
     if (!silent) audio.sfx('ui_close', { vol: 0.4 });
     input.blocked = this.stack.length > 0;
+    // the key/click that closed a panel must not also act in the game world
+    input.pressed.clear();
+    input.lmbPressed = false;
+    input.lmb = input.rmb = false;
     top.onClose?.();
   }
   private top() {
     return this.stack[this.stack.length - 1];
   }
   private closeId(id: PanelId) {
-    const i = this.stack.findIndex((s) => s.id === id);
-    if (i < 0) return;
-    while (this.stack.length > i) this.pop();
+    const entry = this.stack.find((s) => s.id === id);
+    if (!entry) return;
+    // onClose may push new panels (e.g. the next queued event); stop once the target is gone
+    while (this.stack.includes(entry)) this.pop();
   }
   isOpen(id: PanelId) {
     return this.stack.some((s) => s.id === id);
@@ -117,11 +122,16 @@ export class UI implements UiBridge {
           return;
         }
         this.pop();
-      } else if (this.game.world && !this.game.run?.outcome) this.showPause();
+      } else if (this.game.world && !this.game.run?.outcome && !this.game.world.playerDead) this.showPause();
       e.preventDefault();
       return;
     }
-    if (!this.game.world || this.game.run?.outcome) return;
+    if (!this.game.world || this.game.run?.outcome || this.game.world.playerDead) return;
+    if (top?.id === 'station' && (k === 'Tab' || k === 'i' || k === 'I')) {
+      e.preventDefault();
+      this.showShip();
+      return;
+    }
     if (top && !['ship', 'captain', 'map', 'journal'].includes(top.id)) return;
     const map: Record<string, PanelId> = { Tab: 'ship', i: 'ship', I: 'ship', k: 'captain', K: 'captain', m: 'map', M: 'map', j: 'journal', J: 'journal' };
     const id = map[k];
@@ -684,8 +694,7 @@ export class UI implements UiBridge {
       if (t.closest('[data-a="close"]')) return this.closeId('captain');
       const id = t.closest<HTMLElement>('[data-s]')?.dataset.s;
       if (id) {
-        if (learn(run, id)) {
-          game.refresh();
+        if (game.learnSkill(id)) {
           audio.sfx('levelup', { vol: 0.5 });
           this.hideTip();
           render();
